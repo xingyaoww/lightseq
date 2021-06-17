@@ -93,7 +93,7 @@ class TransformerWeight {
   int _n_dec_layer;  // number of decoder layer
   int _dim_per_head;
   int _weight_per_enc_layer;  // 12
-  int _weight_per_dec_layer;  // 18
+  int _weight_per_dec_layer;  // 22
 
   int _head_num;
   int _beam_size;

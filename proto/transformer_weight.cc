@@ -52,7 +52,7 @@ void TransformerWeight<OpType_>::get_model_config(
   _head_num = transformer.model_conf().head_num();
   _dim_per_head = _hidden_size / _head_num;
   _weight_per_enc_layer = 12;
-  _weight_per_dec_layer = 18;
+  _weight_per_dec_layer = 22;
   _beam_size = transformer.model_conf().beam_size();
   _extra_decode_length = transformer.model_conf().extra_decode_length();
   _length_penalty = transformer.model_conf().length_penalty();

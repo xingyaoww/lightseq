@@ -221,11 +221,11 @@ std::string Decoder<OpType_>::check() {
   if (_tw._dim_per_head & 1) {
     return "violate dim_per_head % 2 = 0";
   }
-  if (_tw._is_multilingual && _p_d_trg_emb_wei.size() != 8) {
-    return "violate p_d_trg_emb_wei.size() = 8";
+  if (_tw._is_multilingual && _p_d_trg_emb_wei.size() != 6) {
+    return "violate p_d_trg_emb_wei.size() = 6";
   }
-  if (_tw._is_multilingual == false && _p_d_trg_emb_wei.size() != 7) {
-    return "violate p_d_trg_emb_wei.size() = 7";
+  if (_tw._is_multilingual == false && _p_d_trg_emb_wei.size() != 5) {
+    return "violate p_d_trg_emb_wei.size() = 5";
   }
   if (_p_d_dec_wei.size() != _tw._weight_per_dec_layer * _tw._n_dec_layer) {
     return "violate p_d_dec_wei.size() = weight_per_dec_layer * n_dec_layer";
@@ -323,12 +323,13 @@ void Decoder<OpType_>::project_encoder_output() {
   print_vec(_p_d_encoder_output, "_p_d_encoder_output(head):", 5);
   print_vec(_p_d_encoder_output + _batch_token_num * _tw._hidden_size - 5,
             "_p_d_encoder_output(tail)", 5);
-  print_vec(_p_d_trg_emb_wei[4], "encoder project(head):", 10);
+  print_vec(/* TODO */, "encoder project(head):", 10);
 #endif
   CHECK_GPU_ERROR(cublasGemmEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_N, kv_dim, _batch_token_num, _tw._hidden_size,
-      &_type_one, _p_d_trg_emb_wei[4], _AType, kv_dim, _p_d_encoder_output, _BType,
-      _tw._hidden_size, &_type_zero, _p_d_encoder_out_buf, _CType, kv_dim,
+      _hd, CUBLAS_OP_N, CUBLAS_OP_N, 
+      kv_dim, _batch_token_num, _tw._hidden_size,
+      &_type_one, /* TODO */, _AType, kv_dim,
+      _p_d_encoder_output, _BType, _tw._hidden_size, &_type_zero, _p_d_encoder_out_buf, _CType, kv_dim,
       _computeType, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   // _p_d_encoder_out_buf: [batch_size, batch_seq_len, layer_num, 2,
   // hidden_size]
@@ -342,7 +343,7 @@ void Decoder<OpType_>::project_encoder_output() {
 #endif
   ker_arrange_encdec_kv_launcher<_DataType>(
       _batch_token_num, _tw._n_dec_layer, _tw._hidden_size, _stream,
-      _p_d_encoder_out_buf, _p_d_trg_emb_wei[5], _p_d_encdec_k_bgeem[0],
+      _p_d_encoder_out_buf, /* TODO */, _p_d_encdec_k_bgeem[0],
       _p_d_encdec_v_bgeem[0], _layer_size_encdec_k, _batch_seq_len,
       _tw._dim_per_head, _tw._head_num, _max_thread_per_block);
   return;
@@ -394,13 +395,13 @@ Decode embedding
 */
 template <OperationType OpType_>
 void Decoder<OpType_>::embedding() {
-  // _p_d_trg_emb_wei: {token_emb, position_emb, norm_scale, norm_bias,
-  // enc_out_kernel_kv, enc_out_bias_kv, logit_bias}
+  // Fetch embeddings from ids in _p_d_alive_seq to _p_d_cur_step_query
+  // _p_d_trg_emb_wei: {token_emb, position_emb, norm_scale, norm_bias, logit_bias}
   if (_tw._is_multilingual) {
     ker_multilg_dec_emb_launcher<_DataType>(
         _step_token_num, _tw._hidden_size, _stream,
 	_p_d_trg_emb_wei[0], _p_d_trg_emb_wei[1],
-	_tw.get_src_emb_wei()[4], _p_d_trg_emb_wei[7],
+	_tw.get_src_emb_wei()[4], _p_d_trg_emb_wei[5],
 	_p_d_token_id, _p_d_alive_seq,
 	_p_d_cur_step_query, _cur_step, _tw._max_step, 
 	_tw._trg_vocab_size, _tw._beam_size, _batch_seq_len, _max_thread_per_block);
@@ -457,7 +458,7 @@ Decoder self attention
 */
 template <OperationType OpType_>
 void Decoder<OpType_>::self_attention() {
-  /* ---step 0. layer_norm, add output_bias to "query"--- */
+  /* ---step 0. layer_norm, add output_bias to "query" (input) --- */
   ker_norm_layer_resual_launcher<_DataType>(
       _step_token_num, _tw._hidden_size, _stream, _p_d_cur_step_query,
       _p_d_query_buf1, _p_d_dec_wei[_weight_offset],
@@ -683,13 +684,13 @@ bool Decoder<OpType_>::sample() {
   if (_tw._sampling_method == "topk") {
     ker_topk_sample_launcher<_DataType>(
         _batch_size, (_cur_step + 1), _tw._max_step, 1, _max_thread_per_block,
-        _stream, _p_d_logit_buf, _p_d_trg_emb_wei[6], _p_d_alive_seq,
+        _stream, _p_d_logit_buf, _p_d_trg_emb_wei[4], _p_d_alive_seq,
         _p_d_alive_seq_buf, _tw._trg_vocab_size, _tw._topk,
         _p_d_sample_unfinished, _p_d_curandstate, _tw._end_id);
   } else {
     ker_topp_sample_launcher<_DataType>(
         _batch_size, (_cur_step + 1), _tw._max_step, 1, _max_thread_per_block,
-        _stream, _p_d_logit_buf, _p_d_trg_emb_wei[6], _p_d_alive_seq,
+        _stream, _p_d_logit_buf, _p_d_trg_emb_wei[4], _p_d_alive_seq,
         _p_d_alive_seq_buf, _tw._trg_vocab_size, _tw._topp,
         _p_d_sample_unfinished, _p_d_curandstate, _tw._end_id);
   }
@@ -817,7 +818,7 @@ void Decoder<OpType_>::update_new_seq_probs() {
 
   if (_tw._is_multilingual) {
     select_beam_rough_topk_multilg_launcher(
-      _p_d_logit_buf, _p_d_trg_emb_wei[6], _p_d_alive_seq_probs,
+      _p_d_logit_buf, _p_d_trg_emb_wei[4], _p_d_alive_seq_probs,
       _p_d_alive_seq_score, _p_d_alive_seq,
       _tw._p_d_trg_vocab_mask, _p_d_token_id,
       _p_d_can_idx, _p_d_can_score,
@@ -827,7 +828,7 @@ void Decoder<OpType_>::update_new_seq_probs() {
       _tw._end_id, _batch_seq_len);
   } else {
     select_beam_rough_topk_launcher(
-      _p_d_logit_buf, _p_d_trg_emb_wei[6], _p_d_alive_seq_probs,
+      _p_d_logit_buf, _p_d_trg_emb_wei[4], _p_d_alive_seq_probs,
       _p_d_alive_seq_score, _p_d_alive_seq, _p_d_can_idx, _p_d_can_score,
       _p_d_can_num, _tw._trg_vocab_size, _tw._max_step,
       _h_length_norm[_cur_step], _cur_step, _step_token_num,
@@ -851,7 +852,7 @@ bool Decoder<OpType_>::topk_greedy_search() {
   /* --- Sample new tokens from logits --- */
   ker_topk_sample_launcher<_DataType>(
       _step_token_num, (_cur_step + 1), _tw._max_step, 1, _max_thread_per_block,
-      _stream, _p_d_logit_buf, _p_d_trg_emb_wei[6], _p_d_alive_seq,
+      _stream, _p_d_logit_buf, _p_d_trg_emb_wei[4], _p_d_alive_seq,
       _p_d_alive_seq_buf, _tw._trg_vocab_size, 1, _p_d_sample_unfinished,
       _p_d_curandstate, _tw._end_id);
 

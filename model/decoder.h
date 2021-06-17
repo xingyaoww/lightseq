@@ -111,7 +111,7 @@ class Decoder {
   int _batch_max_decode_length;
   bool _is_sampling;
 
-  const std::vector<const _DataType*>& _p_d_trg_emb_wei;  // size: 7
+  const std::vector<const _DataType*>& _p_d_trg_emb_wei;  // {token_emb, position_emb, norm_scale, norm_bias, logit_bias} size: 5
   const std::vector<const _DataType*>&
       _p_d_dec_wei;  // size: 18 * dec_layer_num
   const _DataType _type_one;

@@ -36,9 +36,9 @@ class TransformerWeight {
 
   // store the weights pointer
   std::vector<const _DataType *> _p_d_src_emb_wei;  // size: 4
-  std::vector<const _DataType *> _p_d_trg_emb_wei;  // size: 4
+  std::vector<const _DataType *> _p_d_trg_emb_wei;  // size: 5 {token_emb, position_emb, norm_scale, norm_bias, logit_bias}
   std::vector<const _DataType *> _p_d_enc_wei;      // size: 12 * enc_layer_num
-  std::vector<const _DataType *> _p_d_dec_wei;      // size: 18 * dec_layer_num
+  std::vector<const _DataType *> _p_d_dec_wei;      // size: 22 * dec_layer_num
 
   // store the weights on gpu memo
   thrust::device_vector<_DataType> _d_src_emb_wei;
@@ -58,8 +58,7 @@ class TransformerWeight {
   }
 
   const std::vector<const _DataType *> &get_trg_emb_wei() const {
-    // {token_emb, pos_emb, norm_scale, norm_bias, encdec_kv_kernel,
-    // encdec_kv_bias, logit_bias}
+    // {token_emb, position_emb, norm_scale, norm_bias, logit_bias}
     return _p_d_trg_emb_wei;
   }
 
@@ -76,7 +75,10 @@ class TransformerWeight {
     // {self_norm_scale, self_norm_bias,
     // self_qkv_kernel, self_qkv_bias, self_output_kernel, self_output_bias,
     // encdec_norm_scale, encdec_norm_bias,
-    // encdec_q_kernel, encdec_q_bias, encdec_output_kernel,  encdec_output_bias
+    // encdec_q_kernel, encdec_q_bias,
+    // encdec_k_kernel, encdec_k_bias,
+    // encdec_v_kernel, encdec_v_bias,
+    //  encdec_output_kernel,  encdec_output_bias
     // ffn_norm_scale, ffn_norm_bias, ffn_first_kernel, ffn_first_bias,
     // ffn_second_kernel, ffn_second_bias, } * decoder_layer_num
     return _p_d_dec_wei;

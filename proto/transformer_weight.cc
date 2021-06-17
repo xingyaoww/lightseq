@@ -121,23 +121,7 @@ std::string TransformerWeight<OpType_>::parse_emb_wei(
       _p_d_src_emb_wei.push_back(
           thrust::raw_pointer_cast(_d_src_emb_wei.data()) + e);
   } else {
-    // for trg, encdec_kv_kernel, encdec_kv_bias, logit_bias
-
-    offset.push_back(idx);
-    if (layer.encode_output_project_kernel_kv_size() !=
-        _hidden_size * _hidden_size * 2 * _n_dec_layer)
-      return "Wrong encode_output_project_kernel_kv_size !";
-    for (float ele : layer.encode_output_project_kernel_kv())
-      value.push_back(ele);
-    idx += _hidden_size * _hidden_size * 2 * _n_dec_layer;
-
-    offset.push_back(idx);
-    if (layer.encode_output_project_bias_kv_size() !=
-        _hidden_size * 2 * _n_dec_layer)
-      return "Wrong encode_output_project_bias_kv_size !";
-    for (float ele : layer.encode_output_project_bias_kv())
-      value.push_back(ele);
-    idx += _hidden_size * 2 * _n_dec_layer;
+    // for trg, logit_bias
 
     offset.push_back(idx);
     if (layer.shared_bias_size() != vocab_size)
@@ -362,6 +346,30 @@ std::string TransformerWeight<OpType_>::parse_dec_wei(
     if (dec_layer.encdec_project_bias_q_size() != _hidden_size)
       return "Wrong encdec_project_bias_q size !";
     for (float ele : dec_layer.encdec_project_bias_q()) value.push_back(ele);
+    idx += _hidden_size;
+
+    offset.push_back(idx);
+    if (dec_layer.encdec_project_kernel_k_size() != _hidden_size * _hidden_size)
+      return "Wrong encdec_project_kernel_k size !";
+    for (float ele : dec_layer.encdec_project_kernel_k()) value.push_back(ele);
+    idx += _hidden_size * _hidden_size;
+
+    offset.push_back(idx);
+    if (dec_layer.encdec_project_bias_k_size() != _hidden_size)
+      return "Wrong encdec_project_bias_k size !";
+    for (float ele : dec_layer.encdec_project_bias_k()) value.push_back(ele);
+    idx += _hidden_size;
+
+    offset.push_back(idx);
+    if (dec_layer.encdec_project_kernel_v_size() != _hidden_size * _hidden_size)
+      return "Wrong encdec_project_kernel_v size !";
+    for (float ele : dec_layer.encdec_project_kernel_v()) value.push_back(ele);
+    idx += _hidden_size * _hidden_size;
+
+    offset.push_back(idx);
+    if (dec_layer.encdec_project_bias_v_size() != _hidden_size)
+      return "Wrong encdec_project_bias_v size !";
+    for (float ele : dec_layer.encdec_project_bias_v()) value.push_back(ele);
     idx += _hidden_size;
 
     offset.push_back(idx);

@@ -22,7 +22,7 @@ def check_rule(tensor_name, rule):
     return True
 
 
-def fill_layer(tensor_names, stete_dict, layer, mapping_dict):
+def fill_layer(tensor_names, state_dict, layer, mapping_dict):
     for proto_name, ckpt_rule in mapping_dict.items():
         expression = [
             ele for ele in ckpt_rule.split("&&") if ele.startswith("expression_")
@@ -51,7 +51,7 @@ def fill_layer(tensor_names, stete_dict, layer, mapping_dict):
                 print(tmp, cr)
             assert len(tmp) == 1
             target_tn.extend(tmp)
-        target_tensor = [stete_dict[name] for name in target_tn]
+        target_tensor = [state_dict[name] for name in target_tn]
         tt = {}
         if target_tensor:
             exec("tt['save'] = [ele%s for ele in target_tensor]" % expression)

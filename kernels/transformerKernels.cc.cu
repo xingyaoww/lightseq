@@ -1202,6 +1202,85 @@ template void ker_arrange_encdec_q_launcher<__half>(
     const __half* ori_q, const __half* q_bias, __half* new_q, int beam_size,
     int dim_per_head, int head_num, int max_thread_per_block);
 
+
+/**
+@brief: ker_arrange_encdec_q_w
+transpose q_w as EL-Attention implementation.
+
+@thread
+gridDim.x = head_num
+gridDim.y = batch_size * beam_size
+blockDim.x = max_thread_per_block
+
+@param
+ori_q_w: [head_num, batch_size * beam_size, head_num * dim_per_head]
+new_q_w: [batch_size, head_num * beam_size, head_num * dim_per_head]
+
+beam_size: beam size of beam search
+dim_per_head: dim of one head in multi-head attention
+head_num: head number in multi-head attention
+*/
+template <typename T>
+__global__ void ker_arrange_encdec_q_w(const T* ori_q_w, T* new_q_w,
+                                     int beam_size, int dim_per_head,
+                                     int head_num) {
+  int hidden_size = dim_per_head * head_num;
+  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+    T val = ori_q_w[targetid_3dim(blockIdx.x, blockIdx.y, i, gridDim.y, hidden_size)];
+    int batch_id = blockIdx.y / beam_size;
+    int beam_id = blockIdx.y % beam_size;
+    int head_id = i / dim_per_head;
+    int dim_id = i % dim_per_head;
+    new_q[targetid_3dim(batch_id, head_id * beam_size + beam_id, dim_id, gridDim.x * beam_size, hidden_size)] = val;
+  }
+}
+
+template <>
+__global__ void ker_arrange_encdec_q_w<__half>(const __half* ori_q_w,
+                                             __half* new_q_w, int beam_size,
+                                             int dim_per_head, int head_num) {
+  int half_hidden_size = dim_per_head * head_num;
+  for (std::size_t i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
+    const half2* p_q = (const half2*)ori_q_w;
+    half2 val = p_q[targetid_3dim(blockIdx.x, blockIdx.y, i, gridDim.y, half_hidden_size)];
+
+    int batch_id = blockIdx.x / beam_size;
+    int beam_id = blockIdx.x % beam_size;
+    int head_id = i / dim_per_head;
+    int dim_id = i % dim_per_head;
+    ((half2*)new_q_w)[targetid_3dim(batch_id, head_id * beam_size + beam_id, dim_id, gridDim.x * beam_size, half_hidden_size)] = val;
+  }
+}
+
+template <typename T>
+void ker_arrange_encdec_q_w_launcher(int step_token_num, int hidden_size,
+                                   cudaStream_t stream, const T* ori_q_w,T* new_q_w, int beam_size,
+                                   int dim_per_head, int head_num,
+                                   int max_thread_per_block) {
+  ker_arrange_encdec_q_w<T><<<dim3(head_num, step_token_num), max_thread_per_block, 0, stream>>>(
+      ori_q_w, new_q_w, beam_size, dim_per_head, head_num);
+}
+
+template <>
+void ker_arrange_encdec_q_w_launcher<__half>(
+    int step_token_num, int hidden_size, cudaStream_t stream,
+    const __half* ori_q_w, __half* new_q_w, int beam_size,
+    int dim_per_head, int head_num, int max_thread_per_block) {
+  ker_arrange_encdec_q_w<__half><<<dim3(head_num, step_token_num), max_thread_per_block, 0, stream>>>(
+          ori_q_w, new_q_w, beam_size, dim_per_head / 2, head_num);
+}
+
+template void ker_arrange_encdec_q_w_launcher<float>(
+    int step_token_num, int hidden_size, cudaStream_t stream,
+    const float* ori_q_w, float* new_q_w, int beam_size,
+    int dim_per_head, int head_num, int max_thread_per_block);
+
+template void ker_arrange_encdec_q_w_launcher<__half>(
+    int step_token_num, int hidden_size, cudaStream_t stream,
+    const __half* ori_q_w,  __half* new_q_w, int beam_size,
+    int dim_per_head, int head_num, int max_thread_per_block);
+
+
 /**
 @brief: ker_correlation_softmax_encself
 query-key correlation softmax for encoder self attention

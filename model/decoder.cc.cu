@@ -583,9 +583,14 @@ void Decoder<OpType_>::encdec_attention() {
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
   // TODO: 2.2 calculate q_b = Q_i * (b_i^K)^T
-  // b_i^Q: _p_d_dec_wei[_weight_offset + 11] encdec_k_bias of shape [head_num, dim_per_head, 1] TODO: ideally do this later to save cache space
-  
+  // b_i^Q: _p_d_dec_wei[_weight_offset + 11] encdec_k_bias of shape [head_num,
+  // dim_per_head, 1] TODO: ideally do this later to save cache space
+
   // TODO: 2.3 reshape q_w and q_b (bring batch dim to first)
+  ker_arrange_encdec_q_w_launcher<_DataType>(
+      _step_token_num, _tw._hidden_size, _stream,
+      /*old_q_w*/ _p_d_query_buf2, /*new_q_w*/ _p_d_query_buf1, _tw._beam_size,
+      _tw._dim_per_head, _tw._head_num, _max_thread_per_block);
 
   // TODO: 2.4 attn_weights =  q_w * raw_K^T
   // raw_K (hidden_state from encoder) in _p_d_encoder_output: [batch_size,

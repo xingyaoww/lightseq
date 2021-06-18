@@ -88,14 +88,6 @@ class Decoder {
   std::vector<_DataType*> _p_d_self_v_bgeem;
   _DataType** _p_d_self_v_bgeem1;
   _DataType** _p_d_self_v_bgeem2;
-  // key re-arrange for batch_geem in encdec atten, one pointer for one decoder
-  // layer device memory in [batch_size, head_num, dim_per_head, batch_seq_len]
-  // format
-  std::vector<_DataType*> _p_d_encdec_k_bgeem;
-  // value re-arrange for batch_geem in encdec atten, one pointer for one
-  // decoder layer device memory in [batch_size, head_num, batch_seq_len,
-  // dim_per_head] format
-  std::vector<_DataType*> _p_d_encdec_v_bgeem;
   _DataType* _p_d_query_buf1;
   _DataType* _p_d_query_buf2;
   _DataType* _p_d_c;
@@ -120,7 +112,6 @@ class Decoder {
   const _DataType _atten_scaler;  // scaling factor of Scaled Dot-Product Attention
   const float _logit_scaler;  // output scaling factor of the liner project
                                    // after decoder
-  const long _layer_size_encdec_k;
   const long _layer_size_self_k;
 
  public:

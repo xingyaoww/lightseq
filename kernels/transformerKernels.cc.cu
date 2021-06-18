@@ -1133,7 +1133,7 @@ blockDim.x = max_thread_per_block
 @param
 ori_q: [batch_size, beam_size, hidden_size]
 q_bias: [hidden_size]
-new_q: [batch_size, head_num, beam_size, dim_per_head]
+new_q: [head_num, batch_size * beam_size, dim_per_head]
 beam_size: beam size of beam search
 dim_per_head: dim of one head in multi-head attention
 head_num: head number in multi-head attention
@@ -1149,8 +1149,7 @@ __global__ void ker_arrange_encdec_q(const T* ori_q, const T* q_bias, T* new_q,
     int beam_id = blockIdx.x % beam_size;
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
-    new_q[targetid_4dim(batch_id, head_id, beam_id, dim_id, head_num, beam_size,
-                        dim_per_head)] = val;
+    new_q[targetid_3dim(head_id, blockIdx.x, dim_id, gridDim.x, dim_per_head)] = val;
   }
 }
 
@@ -1169,8 +1168,7 @@ __global__ void ker_arrange_encdec_q<__half>(const __half* ori_q,
     int beam_id = blockIdx.x % beam_size;
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
-    ((half2*)new_q)[targetid_4dim(batch_id, head_id, beam_id, dim_id, head_num,
-                                  beam_size, dim_per_head)] = val;
+    ((half2*)new_q)[targetid_3dim(head_id, blockIdx.x, dim_id, gridDim.x, dim_per_head)] = val;
   }
 }
 

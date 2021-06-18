@@ -35,7 +35,6 @@ Decoder<OpType_>::Decoder(int max_batch_size, const int* p_d_padding_mask,
       _hd(hd),
       _output_topk(output_topk),
       _p_d_token_id(p_d_token_id), // source token id
-      _layer_size_encdec_k(max_batch_size * tw._max_step * tw._hidden_size),
       _layer_size_self_k(max_batch_size * tw._max_step * tw._hidden_size *
                          tw._beam_size),
       _type_one(1.f),
@@ -66,14 +65,13 @@ Compute GPU memory size needed by transformer decoder,
 template <OperationType OpType_>
 long Decoder<OpType_>::compute_buffer_bytesize() {
   long cache_bytesize = 4 * _tw._n_dec_layer * _layer_size_self_k +
-                        2 * _tw._n_dec_layer * _layer_size_encdec_k +
                         _max_batch_size * _tw._beam_size * _tw._hidden_size;
   cache_bytesize *= sizeof(_DataType);
 
   long decode_buffer_bytesize =
       _max_batch_size * _tw._beam_size * _tw._hidden_size * 4 +
       _max_batch_size * _tw._beam_size *
-          max(_tw._hidden_size, _tw._inner_size) +
+          max(_tw._hidden_size * _tw._head_num, _tw._inner_size) +
       _max_batch_size * _tw._head_num * _tw._beam_size * _tw._max_step;
   decode_buffer_bytesize *= sizeof(_DataType);
 
@@ -98,19 +96,9 @@ void Decoder<OpType_>::init_buffer(void* pbuf) {
   std::cout << "decoder buffer init start" << std::endl;
   _DataType* curp = reinterpret_cast<_DataType*>(pbuf);
 
-  for (int i = 0; i < _tw._n_dec_layer; i++) {
-    // encoder ouput after project, the "key" of enc_dec attention
-    _p_d_encdec_k_bgeem.push_back(curp);
-    curp += _layer_size_encdec_k;
-  }
-  for (int i = 0; i < _tw._n_dec_layer; i++) {
-    // encoder ouput after project, the "value" of enc_dec attention
-    _p_d_encdec_v_bgeem.push_back(curp);
-    curp += _layer_size_encdec_k;
-  }
   // reused buffer with _p_d_self_k_bgeem _p_d_self_v_bgeem,
   // no need to add curp because _p_d_encoder_out_buf is smaller
-  // and no need to use it any more after get _p_d_encdec_k_bgeem
+  // and no need to use it any more (TODO: check this) after get _p_d_encdec_k_bgeem
   // and _p_d_encdec_v_bgeem
   _p_d_encoder_out_buf = curp;
 
@@ -152,8 +140,7 @@ void Decoder<OpType_>::init_buffer(void* pbuf) {
   _p_d_query_buf1 = curp;  // "query" buffer
   curp += _max_batch_size * _tw._beam_size * _tw._hidden_size;
   _p_d_query_buf2 = curp;  // "query" buffer
-  curp +=
-      _max_batch_size * _tw._beam_size * max(_tw._hidden_size, _tw._inner_size);
+  curp += _max_batch_size * _tw._beam_size * max(_tw._hidden_size * _tw._head_num, _tw._inner_size);
   _p_d_c = curp;  // correlation(attention score) buffer
   curp += _max_batch_size * _tw._head_num * _tw._beam_size * _tw._max_step;
 
@@ -265,7 +252,6 @@ void Decoder<OpType_>::run_one_infer(int batch_size, int batch_seq_len) {
     _batch_max_decode_length = _tw._max_step;
   }
 
-  // project_encoder_output();  // project encoder output
   // init the first step's token id with target start_id
   CHECK_GPU_ERROR(cudaMemcpyAsync(_p_d_alive_seq_probs,
                                   _h_alive_seq_probs.data(),
@@ -309,43 +295,6 @@ void Decoder<OpType_>::run_one_infer(int batch_size, int batch_seq_len) {
     print_vec(_p_d_result + i * (_cur_step + 1), "finial res", _cur_step + 1);
   }
 #endif
-  return;
-}
-
-/**
-Project encoder output
-*/
-template <OperationType OpType_>
-void Decoder<OpType_>::project_encoder_output() {
-  int kv_dim = _tw._hidden_size * 2 * _tw._n_dec_layer;
-#ifdef DEBUG_RESULT
-  CHECK_GPU_ERROR(cudaStreamSynchronize(_stream));
-  print_vec(_p_d_encoder_output, "_p_d_encoder_output(head):", 5);
-  print_vec(_p_d_encoder_output + _batch_token_num * _tw._hidden_size - 5,
-            "_p_d_encoder_output(tail)", 5);
-  print_vec(/* TODO */, "encoder project(head):", 10);
-#endif
-  CHECK_GPU_ERROR(cublasGemmEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_N, 
-      kv_dim, _batch_token_num, _tw._hidden_size,
-      &_type_one, /* TODO */, _AType, kv_dim,
-      _p_d_encoder_output, _BType, _tw._hidden_size, &_type_zero, _p_d_encoder_out_buf, _CType, kv_dim,
-      _computeType, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  // _p_d_encoder_out_buf: [batch_size, batch_seq_len, layer_num, 2,
-  // hidden_size]
-
-#ifdef DEBUG_RESULT
-  CHECK_GPU_ERROR(cudaStreamSynchronize(_stream));
-  print_vec(_p_d_encoder_out_buf, "encoder out(head):", 5);
-  print_vec(_p_d_encoder_out_buf +
-                _batch_token_num * _tw._hidden_size * _tw._n_dec_layer - 5,
-            "encoder out(tail):", 5);
-#endif
-  ker_arrange_encdec_kv_launcher<_DataType>(
-      _batch_token_num, _tw._n_dec_layer, _tw._hidden_size, _stream,
-      _p_d_encoder_out_buf, /* TODO */, _p_d_encdec_k_bgeem[0],
-      _p_d_encdec_v_bgeem[0], _layer_size_encdec_k, _batch_seq_len,
-      _tw._dim_per_head, _tw._head_num, _max_thread_per_block);
   return;
 }
 
@@ -587,14 +536,58 @@ void Decoder<OpType_>::encdec_attention() {
    * gemm--- */
   CHECK_GPU_ERROR(cublasGemmEx(
       _hd, CUBLAS_OP_N, CUBLAS_OP_N, _tw._hidden_size, _step_token_num,
-      _tw._hidden_size, &_type_one, _p_d_dec_wei[_weight_offset + 8], _AType,
-      _tw._hidden_size, _p_d_query_buf1, _BType, _tw._hidden_size, &_type_zero,
+      _tw._hidden_size, &_type_one,
+      _p_d_dec_wei[_weight_offset + 8], _AType,
+      _tw._hidden_size, 
+      _p_d_query_buf1, _BType, _tw._hidden_size, &_type_zero,
       _p_d_query_buf2, _CType, _tw._hidden_size, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   ker_arrange_encdec_q_launcher<_DataType>(
       _step_token_num, _tw._hidden_size, _stream, _p_d_query_buf2,
       _p_d_dec_wei[_weight_offset + 9], _p_d_query_buf1, _tw._beam_size,
       _tw._dim_per_head, _tw._head_num, _max_thread_per_block);
+
+  /* ---step 2. correlation = q * k, perform softmax on correlation--- */
+
+  // 2.1 calculate q_w = Q_i * (W_i^K)^T
+  // q (in _p_d_query_buf1) is reshaped to [head_num, batch_size * beam_size, dim_per_head]
+  // W_i^Q: _p_d_dec_wei[_weight_offset + 10] encdec_k_kernel of shape [head_num, dim_per_head, head_num * dim_per_head]
+
+  // output q_w (in _p_d_query_buf2) shape [head_num, batch_size * beam_size, head_num * dim_per_head]
+  CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
+      _hd, CUBLAS_OP_N, CUBLAS_OP_N, 
+      _batch_size * _tw._beam_size, _tw._head_num * _tw._dim_per_head, 
+      _tw._dim_per_head, 
+      /*alpha*/ &_atten_scaler,
+      
+      _p_d_query_buf1 /*A: [head_num, batch_size * beam_size, dim_per_head]*/,
+      _AType, /*lda*/_batch_size * _tw._beam_size,
+      /*strideA*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
+
+      _p_d_dec_wei[_weight_offset + 10] /*B [head_num, dim_per_head, head_num * dim_per_head] */,
+      _BType, /*ldb*/_tw._dim_per_head, /*strideB*/_tw._dim_per_head * _tw._head_num * _tw._dim_per_head, 
+
+      /*beta*/&_type_zero,
+
+      _p_d_query_buf2 /*C [head_num, batch_size * beam_size, head_num * dim_per_head]*/, _CType, /*ldc*/_batch_size * _tw._beam_size,
+      /*strideC*/ _batch_size * _tw._beam_size * _tw._head_num * _tw._dim_per_head,
+      
+      /*batchCount*/ _tw._head_num, _computeType,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+
+  // TODO: 2.2 calculate q_b = Q_i * (b_i^K)^T
+  // b_i^Q: _p_d_dec_wei[_weight_offset + 11] encdec_k_bias of shape [head_num, dim_per_head, 1]
+
+  // TODO: 2.3 reshape q_w and q_b (bring batch dim to first)
+
+  // TODO: 2.4 attn_weights =  q_w * raw_K^T
+  // raw_K (hidden_state from encoder) in _p_d_encoder_output: [batch_size, batch_seq_len, _tw._hidden_size] = [_batch_token_num, _tw._hidden_size]
+
+  // TODO: 2.5 attn_weights = attn_weights + q_b
+
+  // TODO: 2.6 perform softmax (use old code)
+
 
   /* ---step 2. correlation = q * k, perform softmax on correlation--- */
   // TODO: K will be calculated by applying linear transformation on Q (_p_d_query_buf1)

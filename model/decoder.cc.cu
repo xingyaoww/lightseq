@@ -69,7 +69,8 @@ long Decoder<OpType_>::compute_buffer_bytesize() {
   cache_bytesize *= sizeof(_DataType);
 
   long decode_buffer_bytesize =
-      _max_batch_size * _tw._beam_size * _tw._hidden_size * 4 +
+      _max_batch_size * _tw._beam_size * _tw._hidden_size * 3 +
+      _max_batch_size * _tw._beam_size * _tw._hidden_size * _tw._head_num +
       _max_batch_size * _tw._beam_size *
           max(_tw._hidden_size * _tw._head_num, _tw._inner_size) +
       _max_batch_size * _tw._head_num * _tw._beam_size * _tw._max_step;
@@ -138,7 +139,7 @@ void Decoder<OpType_>::init_buffer(void* pbuf) {
   _p_d_self_step_qkv = curp;  // [q, k, v], result of gemm
   curp += _max_batch_size * _tw._beam_size * _tw._hidden_size * 3;
   _p_d_query_buf1 = curp;  // "query" buffer
-  curp += _max_batch_size * _tw._beam_size * _tw._hidden_size;
+  curp += _max_batch_size * _tw._beam_size * _tw._hidden_size * _tw._head_num;
   _p_d_query_buf2 = curp;  // "query" buffer
   curp += _max_batch_size * _tw._beam_size *
           max(_tw._hidden_size * _tw._head_num, _tw._inner_size);
@@ -582,9 +583,8 @@ void Decoder<OpType_>::encdec_attention() {
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
   // TODO: 2.2 calculate q_b = Q_i * (b_i^K)^T
-  // b_i^Q: _p_d_dec_wei[_weight_offset + 11] encdec_k_bias of shape [head_num,
-  // dim_per_head, 1]
-
+  // b_i^Q: _p_d_dec_wei[_weight_offset + 11] encdec_k_bias of shape [head_num, dim_per_head, 1] TODO: ideally do this later to save cache space
+  
   // TODO: 2.3 reshape q_w and q_b (bring batch dim to first)
 
   // TODO: 2.4 attn_weights =  q_w * raw_K^T

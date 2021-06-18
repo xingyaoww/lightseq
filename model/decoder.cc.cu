@@ -582,23 +582,45 @@ void Decoder<OpType_>::encdec_attention() {
       /*batchCount*/ _tw._head_num, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
-  // TODO: 2.2 calculate q_b = Q_i * (b_i^K)^T
-  // b_i^Q: _p_d_dec_wei[_weight_offset + 11] encdec_k_bias of shape [head_num,
-  // dim_per_head, 1] TODO: ideally do this later to save cache space
-
-  // TODO: 2.3 reshape q_w and q_b (bring batch dim to first)
+  // 2.2 reshape q_w for downstream calculation (bring num_head to dim0)
   ker_arrange_encdec_q_w_launcher<_DataType>(
       _step_token_num, _tw._hidden_size, _stream,
       /*old_q_w*/ _p_d_query_buf2, /*new_q_w*/ _p_d_query_buf1, _tw._beam_size,
       _tw._dim_per_head, _tw._head_num, _max_thread_per_block);
 
-  // TODO: 2.4 attn_weights =  q_w * raw_K^T
-  // raw_K (hidden_state from encoder) in _p_d_encoder_output: [batch_size,
-  // batch_seq_len, _tw._hidden_size] = [_batch_token_num, _tw._hidden_size]
+  // 2.3 attn_weights =  q_w * raw_K^T
+  // new_q_w: [batch_size, head_num * beam_size, head_num * dim_per_head]
+  // raw_K (hidden_state from encoder) in _p_d_encoder_output: [batch_size, batch_seq_len, _tw._hidden_size]
+  // (output) attn_weights: [batch_size, head_num * beam_size, batch_seq_len],
+  // it can fit in _p_d_c as _tw._max_step >= batch_seq_len
+  CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
+      _hd, CUBLAS_OP_N, CUBLAS_OP_T, _tw._head_num * _tw._beam_size,
+      _batch_seq_len, _tw._hidden_size,
+      /*alpha*/ &_type_one,
 
-  // TODO: 2.5 attn_weights = attn_weights + q_b
+      _p_d_query_buf1 /*A (new_q_w): [batch_size, head_num * beam_size, head_num * dim_per_head]*/,
+      _AType, /*lda*/ _tw._head_num * _tw._beam_size,
+      /*strideA*/ _tw._head_num * _tw._beam_size * _tw._head_num * _tw._dim_per_head,
+      
+      _p_d_encoder_output /*B (transposed raw_K) [batch_size, _tw._hidden_size, batch_seq_len] */,
+      _BType, /*ldb TODO: check for potential error here*/ _tw._hidden_size,
+      /*strideB*/ _tw._hidden_size * _batch_seq_len,
 
-  // TODO: 2.6 perform softmax (use old code)
+      /*beta*/ &_type_zero,
+      _p_d_c /*C [batch_size, head_num * beam_size, batch_seq_len]*/,
+      _CType, /*ldc*/ _tw._head_num * _tw._beam_size,
+      /*strideC*/ _tw._head_num * _tw._beam_size * _batch_seq_len,
+
+      /*batchCount*/ _batch_size, _computeType,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+  // TODO: 2.4 calculate q_b = Q_i * (b_i^K)^T, reshape q_b,
+  // and add with `attn_weights` (in _p_d_c) inplace (attn_weights = attn_weights + q_b)
+  // b_i^Q: _p_d_dec_wei[_weight_offset + 11] encdec_k_bias of shape [head_num,
+  // dim_per_head, 1] TODO: ideally do this later to save cache space
+
+
+  // TODO: 2.5 perform softmax (use old code)
 
   /* ---step 2. correlation = q * k, perform softmax on correlation--- */
   // TODO: K will be calculated by applying linear transformation on Q

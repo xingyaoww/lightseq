@@ -584,10 +584,10 @@ void Decoder<OpType_>::encdec_attention() {
       /*batchCount*/ _tw._head_num, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
-  // 2.2 reshape q_w for downstream calculation (bring num_head to dim0)
+  // 2.2 reshape q_w for downstream calculation (bring batch_size to dim0)
   ker_arrange_encdec_q_w_launcher<_DataType>(
       _step_token_num, _tw._hidden_size, _stream,
-      /*old_q_w*/ _p_d_query_buf2, /*new_q_w*/ _p_d_query_buf1, _tw._beam_size,
+      /*old_q_w*/ _p_d_query_buf2, /* new_q_w [batch_size, head_num * beam_size, head_num * dim_per_head] */ _p_d_query_buf1, _tw._beam_size,
       _tw._dim_per_head, _tw._head_num, _max_thread_per_block);
 
   // 2.3 attn_weights =  q_w * raw_K^T
@@ -628,12 +628,12 @@ void Decoder<OpType_>::encdec_attention() {
       _AType, /*lda*/ _batch_size * _tw._beam_size,
       /*strideA*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
 
-      _p_d_dec_wei[_weight_offset + 11] /*B [head_num, dim_per_head, 1] */,
-      _BType, /*ldb*/ _tw._dim_per_head, /*strideB*/ _tw._dim_per_head,
+      _p_d_dec_wei[_weight_offset + 11] /* encdec_k_bias [head_num, dim_per_head, 1] */,
+      _BType, /*ldb*/ _tw._dim_per_head, /* strideB */ _tw._dim_per_head,
 
       /*beta*/ &_type_zero,
 
-      _p_d_query_buf1 /*output q_b [head_num, batch_size * beam_size, 1]*/,
+      _p_d_query_buf1 /* output q_b [head_num, batch_size * beam_size, 1] */,
       _CType, /*ldc*/ _batch_size * _tw._beam_size,
       /*strideC*/ _batch_size * _tw._beam_size,
 
@@ -642,24 +642,85 @@ void Decoder<OpType_>::encdec_attention() {
 
   // 2.5 reshape q_b, and add with `attn_weights` (in _p_d_c) inplace (attn_weights = attn_weights + q_b)
   ker_arrange_encdec_q_b_attn_weights_launcher<_DataType>(
-    _stream, _p_d_query_buf1/*input q_b for reshape*/, _p_d_c /*output*/, _tw._beam_size, _tw._head_num, _batch_seq_len, _batch_size
+    _stream, _p_d_query_buf1 /* input q_b for reshape */, _p_d_c /* output */, _tw._beam_size, _tw._head_num, _batch_seq_len, _batch_size
   );
 
-  // 2.6 perform softmax
+  // 2.6 perform softmax to get attn_probs
   ker_correlation_softmax_encdec_launcher<_DataType>(
       _batch_size, _tw._head_num * _tw._beam_size, _batch_seq_len, _stream,
-      _p_d_c, _p_d_padding_mask);
+      /*output attn_probs*/_p_d_c, _p_d_padding_mask);
 
-  /* ---step 3. new_q = correlation * v--- */
-  // TODO: implements output projection using EL-Attention
+  /* ---step 3. apply output projection --- */
+  // 3.1 X (_p_d_query_buf1) = attn_probs * rawV (hidden_states from encoder)
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _tw._dim_per_head, _tw._beam_size,
-      _batch_seq_len, &_type_one, _p_d_encdec_v_bgeem[_layer_id], _AType,
-      _tw._dim_per_head, _batch_seq_len * _tw._dim_per_head, _p_d_c, _BType,
-      _batch_seq_len, _tw._beam_size * _batch_seq_len, &_type_zero,
-      _p_d_query_buf1, _CType, _tw._dim_per_head,
-      _tw._beam_size * _tw._dim_per_head, _batch_size * _tw._head_num,
+      _hd, CUBLAS_OP_N, CUBLAS_OP_T, _tw._head_num * _tw._beam_size, _batch_seq_len, _tw._hidden_size, &_type_one, 
+      
+      /* attn_probs [batch_size, head_num * beam_size, batch_seq_len] */
+      _p_d_c, /* lda */ _tw._head_num * _tw._beam_size, /* strideA */_tw._head_num * _tw._beam_size * _batch_seq_len,
+      
+      /* rawV (transposed rawV in EL-Attention, i.e. hidden_states from encoder) [batch_size, batch_seq_len, _tw._hidden_size] */
+      _p_d_encoder_output, _BType, /* ldb */_batch_seq_len, /* strideB */_batch_seq_len * _tw._hidden_size, 
+
+      &_type_zero, /* output [batch_size, head_num * beam_size, _tw._hidden_size] */ _p_d_query_buf1, _CType, /* ldc */_tw._head_num * _tw._beam_size,
+      /* strideC */ _tw._head_num * _tw._beam_size * _tw._hidden_size, 
+      
+      /* batchCount */ _batch_size,
       _computeType, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+  // 3.2 reshape X (move num_head to dim0) before calculate FFN^O
+  ker_arrange_encdec_X_prematmul_launcher(_stream, 
+    /* input [batch_size, head_num * beam_size, _tw._hidden_size] */_p_d_query_buf1, 
+    /* output [head_num, batch_size * beam_size, _tw._hidden_size] */_p_d_query_buf2,
+    _tw._beam_size, _tw._hidden_size, _tw._head_num, _batch_size, _max_thread_per_block);
+
+  // 3.2 FFN_i^O(X) = X * W_i^V * W_i^O
+  CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
+      _hd, CUBLAS_OP_N, CUBLAS_OP_T, _batch_size * _tw._beam_size,
+      _tw._dim_per_head, _tw._hidden_size,
+      /*alpha*/ &_atten_scaler,
+
+      _p_d_query_buf2 /* X: [head_num, batch_size * beam_size, _tw._hidden_size] */,
+      _AType, /*lda*/ _batch_size * _tw._beam_size,
+      /*strideA*/ _batch_size * _tw._beam_size * _tw._hidden_size,
+
+      _p_d_dec_wei[_weight_offset +
+                   12] /* (transposed) encdec_v_kernel [head_num, head_num * dim_per_head, dim_per_head] */,
+      _BType, /*ldb*/ _tw._head_num * _tw._dim_per_head,
+      /*strideB*/ _tw._head_num * _tw._dim_per_head * _tw._dim_per_head,
+
+      /*beta*/ &_type_zero,
+
+      _p_d_query_buf1 /* X * W_i^V [head_num, batch_size * beam_size, dim_per_head]*/,
+      _CType, /*ldc*/ _batch_size * _tw._beam_size,
+      /*strideC*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
+
+      /*batchCount*/ _tw._head_num, _computeType,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+  // TODO: reshape X * W_i^V to [batch_size * beam_size, head_num * dim_per_head]
+  // TODO: workout (X * W_i^V) * W_i^O
+  // CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
+  //   _hd, CUBLAS_OP_N, CUBLAS_OP_T, _batch_size * _tw._beam_size,
+  //   /*TODO*/, _tw._dim_per_head,
+  //   /*alpha*/ &_atten_scaler,
+
+  //   _p_d_query_buf1 /* X * W_i^V [head_num, batch_size * beam_size, dim_per_head]*/,
+  //   _AType, /*lda*/ _batch_size * _tw._beam_size,
+  //   /*strideA*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
+
+  //   _p_d_dec_wei[_weight_offset +
+  //                 14] /* (transposed) encdec_output_kernel [head_num, head_num * dim_per_head, dim_per_head] */,
+  //   _BType, /*ldb*/ _tw._head_num * _tw._dim_per_head,
+  //   /*strideB*/ _tw._head_num * _tw._dim_per_head * _tw._dim_per_head,
+
+  //   /*beta*/ &_type_zero,
+
+  //   _p_d_query_buf1 /*C [head_num, batch_size * beam_size, dim_per_head]*/,
+  //   _CType, /*ldc*/ _batch_size * _tw._beam_size,
+  //   /*strideC*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
+
+  //   /*batchCount*/ _tw._head_num, _computeType,
+  //   CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
   ker_arrange_atten_output_launcher<_DataType>(
       _step_token_num, _tw._hidden_size, _stream, _p_d_query_buf1,
       _p_d_query_buf2, _tw._beam_size, _tw._dim_per_head, _tw._head_num,

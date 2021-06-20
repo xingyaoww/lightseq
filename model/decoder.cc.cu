@@ -69,7 +69,7 @@ long Decoder<OpType_>::compute_buffer_bytesize() {
   cache_bytesize *= sizeof(_DataType);
 
   long decode_buffer_bytesize =
-      _max_batch_size * _tw._beam_size * _tw._hidden_size * 3 +
+      _max_batch_size * _tw._beam_size * _tw._hidden_size * 4 +
       _max_batch_size * _tw._beam_size * _tw._hidden_size * _tw._head_num +
       _max_batch_size * _tw._beam_size *
           max(_tw._hidden_size * _tw._head_num, _tw._inner_size) +
@@ -143,6 +143,8 @@ void Decoder<OpType_>::init_buffer(void* pbuf) {
   _p_d_query_buf2 = curp;  // "query" buffer
   curp += _max_batch_size * _tw._beam_size *
           max(_tw._hidden_size * _tw._head_num, _tw._inner_size);
+  _p_d_query_buf3 = curp;  // "query" buffer
+  curp += _max_batch_size * _tw._beam_size * _tw._hidden_size;
   _p_d_c = curp;  // correlation(attention score) buffer
   curp += _max_batch_size * _tw._head_num * _tw._beam_size * _tw._max_step;
 
@@ -544,13 +546,13 @@ void Decoder<OpType_>::encdec_attention() {
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
   ker_arrange_encdec_q_launcher<_DataType>(
       _step_token_num, _tw._hidden_size, _stream, _p_d_query_buf2,
-      _p_d_dec_wei[_weight_offset + 9], _p_d_query_buf1, _tw._beam_size,
+      _p_d_dec_wei[_weight_offset + 9], _p_d_query_buf3, _tw._beam_size,
       _tw._dim_per_head, _tw._head_num, _max_thread_per_block);
 
   /* ---step 2. correlation = q * k, perform softmax on correlation--- */
 
   // 2.1 calculate q_w = Q_i * (W_i^K)^T
-  // q (in _p_d_query_buf1) is reshaped to [head_num, batch_size * beam_size,
+  // q (in _p_d_query_buf3) is reshaped to [head_num, batch_size * beam_size,
   // dim_per_head] W_i^Q: _p_d_dec_wei[_weight_offset + 10] encdec_k_kernel of
   // shape [head_num, dim_per_head, head_num * dim_per_head]
 
@@ -561,7 +563,7 @@ void Decoder<OpType_>::encdec_attention() {
       _tw._head_num * _tw._dim_per_head, _tw._dim_per_head,
       /*alpha*/ &_atten_scaler,
 
-      _p_d_query_buf1 /*A: [head_num, batch_size * beam_size, dim_per_head]*/,
+      _p_d_query_buf3 /*A: [head_num, batch_size * beam_size, dim_per_head]*/,
       _AType, /*lda*/ _batch_size * _tw._beam_size,
       /*strideA*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
 
@@ -607,37 +609,49 @@ void Decoder<OpType_>::encdec_attention() {
       /*strideB*/ _tw._hidden_size * _batch_seq_len,
 
       /*beta*/ &_type_zero,
-      _p_d_c /*C [batch_size, head_num * beam_size, batch_seq_len]*/,
+      _p_d_c /* output attn_weights [batch_size, head_num * beam_size, batch_seq_len]*/,
       _CType, /*ldc*/ _tw._head_num * _tw._beam_size,
       /*strideC*/ _tw._head_num * _tw._beam_size * _batch_seq_len,
 
       /*batchCount*/ _batch_size, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
-  // TODO: 2.4 calculate q_b = Q_i * (b_i^K)^T, reshape q_b,
-  // and add with `attn_weights` (in _p_d_c) inplace (attn_weights = attn_weights + q_b)
-  // b_i^Q: _p_d_dec_wei[_weight_offset + 11] encdec_k_bias of shape [head_num,
-  // dim_per_head, 1] TODO: ideally do this later to save cache space
-
-
-  // TODO: 2.5 perform softmax (use old code)
-
-  /* ---step 2. correlation = q * k, perform softmax on correlation--- */
-  // TODO: K will be calculated by applying linear transformation on Q
-  // (_p_d_query_buf1)
+  // 2.4 calculate q_b = Q_i (in _p_d_query_buf3) * (b_i^K)^T, 
+  // encdec_k_bias b_i^Q (in _p_d_dec_wei[_weight_offset + 11]): [head_num, dim_per_head, 1]
+  // q (in _p_d_query_buf3) is reshaped to [head_num, batch_size * beam_size,
+  // dim_per_head]
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
-      _hd, CUBLAS_OP_T, CUBLAS_OP_N, _batch_seq_len, _tw._beam_size,
-      _tw._dim_per_head, &_atten_scaler, _p_d_encdec_k_bgeem[_layer_id], _AType,
-      _tw._dim_per_head, _batch_seq_len * _tw._dim_per_head, _p_d_query_buf1,
-      _BType, _tw._dim_per_head, _tw._beam_size * _tw._dim_per_head,
-      &_type_zero, _p_d_c, _CType, _batch_seq_len,
-      _tw._beam_size * _batch_seq_len, _batch_size * _tw._head_num,
-      _computeType, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _batch_size * _tw._beam_size, 1, _tw._dim_per_head,
+      /*alpha*/ &_atten_scaler,
+
+      _p_d_query_buf3 /*A: [head_num, batch_size * beam_size, dim_per_head]*/,
+      _AType, /*lda*/ _batch_size * _tw._beam_size,
+      /*strideA*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
+
+      _p_d_dec_wei[_weight_offset + 11] /*B [head_num, dim_per_head, 1] */,
+      _BType, /*ldb*/ _tw._dim_per_head, /*strideB*/ _tw._dim_per_head,
+
+      /*beta*/ &_type_zero,
+
+      _p_d_query_buf1 /*output q_b [head_num, batch_size * beam_size, 1]*/,
+      _CType, /*ldc*/ _batch_size * _tw._beam_size,
+      /*strideC*/ _batch_size * _tw._beam_size,
+
+      /*batchCount*/ _tw._head_num, _computeType,
+      CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+  // 2.5 reshape q_b, and add with `attn_weights` (in _p_d_c) inplace (attn_weights = attn_weights + q_b)
+  ker_arrange_encdec_q_b_attn_weights_launcher<_DataType>(
+    _stream, _p_d_query_buf1/*input q_b for reshape*/, _p_d_c /*output*/, _tw._beam_size, _tw._head_num, _batch_seq_len, _batch_size
+  );
+
+  // 2.6 perform softmax
   ker_correlation_softmax_encdec_launcher<_DataType>(
       _batch_size, _tw._head_num * _tw._beam_size, _batch_seq_len, _stream,
       _p_d_c, _p_d_padding_mask);
 
   /* ---step 3. new_q = correlation * v--- */
+  // TODO: implements output projection using EL-Attention
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
       _hd, CUBLAS_OP_N, CUBLAS_OP_N, _tw._dim_per_head, _tw._beam_size,
       _batch_seq_len, &_type_one, _p_d_encdec_v_bgeem[_layer_id], _AType,

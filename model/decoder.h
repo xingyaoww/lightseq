@@ -90,6 +90,7 @@ class Decoder {
   _DataType** _p_d_self_v_bgeem2;
   _DataType* _p_d_query_buf1;
   _DataType* _p_d_query_buf2;
+  _DataType* _p_d_query_buf3;
   _DataType* _p_d_c;
   _DataType* _p_d_encoder_out_buf;
   _DataType* _p_d_logit_buf;

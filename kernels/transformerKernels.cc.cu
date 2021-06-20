@@ -1296,6 +1296,7 @@ attn_weights: [batch_size, head_num * beam_size, batch_seq_len]
 beam_size: beam size of beam search
 dim_per_head: dim of one head in multi-head attention
 head_num: head number in multi-head attention
+TODO: update params here
 */
 template <typename T>
 __global__ void ker_arrange_encdec_q_b_attn_weights(const T* q_b, T* attn_weights, int beam_size, int head_num, int batch_seq_len) {
@@ -1509,6 +1510,80 @@ template void ker_correlation_softmax_encdec_launcher<float>(
 template void ker_correlation_softmax_encdec_launcher<__half>(
     int batch_size, int head_num_per_seq, int batch_seq_len,
     cudaStream_t stream, __half* correlation, const int* src_padding_mask);
+
+/**
+@brief: ker_arrange_encdec_X_prematmul
+reshape X (_p_d_query_buf1) = attn_probs * rawV
+into shape of [head_num, batch_size * beam_size, _tw._hidden_size].
+to make head_num dim 0.
+
+@thread
+gridDim.x = batch_size
+gridDim.y = head_num * beam_size
+blockDim.x = max_thread_per_block
+
+@param
+ori_X: [batch_size, head_num * beam_size, _tw._hidden_size]
+new_X: [head_num, batch_size * beam_size, _tw._hidden_size]
+
+beam_size: beam size of beam search
+hidden_size: hidden_size (will halfed when using half2 datatype to handle fp16 compared to fp32)
+head_num: head number in multi-head attention
+*/
+template <typename T>
+__global__ void ker_arrange_encdec_X_prematmul(const T* ori_X, T* new_X,
+                                     int beam_size, int hidden_size,
+                                     int head_num) {
+  int batch_size = gridDim.x;
+  for (std::size_t dim_id = threadIdx.x; dim_id < hidden_size; dim_id += blockDim.x) {
+    int batch_id = blockIdx.x;
+    int head_id = blockIdx.y / beam_size;
+    int beam_id = blockIdx.y % beam_size;
+    new_X[targetid_3dim(head_id, batch_id * beam_size + beam_id, dim_id, batch_size * beam_size, hidden_size)] = ori_X[targetid_3dim(batch_id, blockIdx.y, dim_id, gridDim.y /* head_num * beam_size */, hidden_size)];
+  }
+}
+
+template <>
+__global__ void ker_arrange_encdec_X_prematmul<__half>(const __half* ori_X,
+                                             __half* new_X, int beam_size,
+                                             int half_hidden_size, int head_num) {
+  int batch_size = gridDim.x;
+  for (std::size_t dim_id = threadIdx.x; dim_id < half_hidden_size; dim_id += blockDim.x) {
+    int batch_id = blockIdx.x;
+    int head_id = blockIdx.y / beam_size;
+    int beam_id = blockIdx.y % beam_size;
+    const half2* p_ori_X = (const half2*)ori_X;
+    ((half2*)new_X)[targetid_3dim(head_id, batch_id * beam_size + beam_id, dim_id, batch_size * beam_size, half_hidden_size)] = p_ori_X[targetid_3dim(batch_id, blockIdx.y, dim_id, gridDim.y /* head_num * beam_size */, half_hidden_size)];
+  }
+}
+
+template <typename T>
+void ker_arrange_encdec_X_prematmul_launcher(cudaStream_t stream, const T* ori_X, T* new_X, int beam_size,
+                                   int hidden_size, int head_num, int batch_size,
+                                   int max_thread_per_block) {
+  ker_arrange_encdec_X_prematmul<T><<<dim3(batch_size, head_num * beam_size), max_thread_per_block, 0, stream>>>(
+      ori_X, new_X, beam_size, hidden_size, head_num);
+}
+
+template <>
+void ker_arrange_encdec_X_prematmul_launcher<__half>(cudaStream_t stream,
+    const __half* ori_X, __half* new_X, int beam_size,
+     int hidden_size, int head_num, int batch_size, int max_thread_per_block) {
+  ker_arrange_encdec_X_prematmul<__half>
+      <<<dim3(batch_size, head_num * beam_size), max_thread_per_block, 0, stream>>>(
+          ori_X, new_X, beam_size, hidden_size / 2, head_num);
+}
+
+template void ker_arrange_encdec_X_prematmul_launcher<float>(
+    cudaStream_t stream, const float* ori_X, float* new_X, int beam_size,
+                                   int hidden_size, int head_num, int batch_size,
+                                   int max_thread_per_block);
+
+template void ker_arrange_encdec_X_prematmul_launcher<__half>(
+cudaStream_t stream,
+    const __half* ori_X, __half* new_X, int beam_size,
+     int hidden_size, int head_num, int batch_size, int max_thread_per_block);
+
 
 /**
 @brief: ker_arrange_atten_output

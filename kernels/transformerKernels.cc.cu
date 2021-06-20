@@ -1295,8 +1295,8 @@ reshape q_b to a broadcastable shape [batch_size, head_num * beam_size, 1] of
 attn_weights (q_w * raw_K), then add q_b to attn_weights.
 
 @thread
-gridDim.x = batch_size * beam_size
-blockDim.x = head_num
+gridDim.x = head_num
+blockDim.x = max_thread_per_block
 
 @param
 q_b: [head_num, batch_size * beam_size, 1]
@@ -1305,29 +1305,31 @@ attn_weights: [batch_size, head_num * beam_size, batch_seq_len]
 beam_size: beam size of beam search
 dim_per_head: dim of one head in multi-head attention
 head_num: head number in multi-head attention
-TODO: update params here
+batch_seq_len: sequence length from encoder
 */
 template <typename T>
 __global__ void ker_arrange_encdec_q_b_attn_weights(const T* q_b,
                                                     T* attn_weights,
                                                     int beam_size, int head_num,
-                                                    int batch_seq_len) {
+                                                    int batch_seq_len,
+                                                    int batch_size) {
   // reshape q_b [head_num, batch_size * beam_size, 1]
   // to shape [batch_size, head_num * beam_size, 1]
   // and add with attn_weights: [batch_size, head_num * beam_size,
   // batch_seq_len]
-  // TODO: check whether more threads is faster, or less threads for less
-  // overhead and more cache sharing?
-  int batch_size = gridDim.x / beam_size;
-  if (threadIdx.x < head_num) {
-    int head_id = threadIdx.x;
-    int batch_id = blockIdx.x / beam_size;
-    int beam_id = blockIdx.x % beam_size;
-    T val = q_b[targetid_3dim(head_id, batch_id * beam_size + beam_id, 0,
-                              gridDim.x, 1)];
-    for (size_t i = 0; i < batch_seq_len; i++) {
-      attn_weights[targetid_3dim(batch_id, head_id * beam_size + beam_id, i,
-                                 head_num * beam_size, batch_seq_len)] += val;
+  int head_id = blockIdx.x;
+  if (head_id < head_num) {
+    for (size_t i = threadIdx.x; i < batch_size * beam_size * batch_seq_len;
+         i += blockDim.x) {
+      int batch_id = i / (beam_size * batch_seq_len);
+      int _remainder = i % (beam_size * batch_seq_len);
+      int beam_id = _remainder / batch_seq_len;
+      int batch_seq_id = _remainder % batch_seq_len;
+      T val = q_b[targetid_3dim(head_id, batch_id * beam_size + beam_id, 0,
+                                gridDim.x, 1)];
+      attn_weights[targetid_3dim(batch_id, head_id * beam_size + beam_id,
+                                 batch_seq_id, head_num * beam_size,
+                                 batch_seq_len)] += val;
     }
   }
 }
@@ -1335,57 +1337,58 @@ __global__ void ker_arrange_encdec_q_b_attn_weights(const T* q_b,
 template <>
 __global__ void ker_arrange_encdec_q_b_attn_weights<__half>(
     const __half* q_b, __half* attn_weights, int beam_size, int head_num,
-    int batch_seq_len) {
+    int batch_seq_len, int batch_size) {
   // reshape q_b [head_num, batch_size * beam_size, 1]
   // to shape [batch_size, head_num * beam_size, 1]
   // and add with attn_weights: [batch_size, head_num * beam_size,
   // batch_seq_len]
-  // TODO: check whether more threads is faster, or less threads for less
-  // overhead and more cache sharing?
+  int head_id = blockIdx.x;
   const half2* p_q_b = (const half2*)q_b;
   half2* p_attn_weights = (half2*)attn_weights;
-  int batch_size = gridDim.x / beam_size;
-  if (threadIdx.x < head_num) {
-    int head_id = threadIdx.x;
-    int batch_id = blockIdx.x / beam_size;
-    int beam_id = blockIdx.x % beam_size;
-    half2 val = p_q_b[targetid_3dim(head_id, batch_id * beam_size + beam_id, 0,
-                                    gridDim.x, 1)];
-    for (size_t i = 0; i < batch_seq_len; i++) {
-      size_t _tgt_idx = targetid_3dim(batch_id, head_id * beam_size + beam_id,
-                                      i, head_num * beam_size, batch_seq_len);
+  if (head_id < head_num) {
+    for (size_t i = threadIdx.x; i < batch_size * beam_size * batch_seq_len;
+         i += blockDim.x) {
+      int batch_id = i / (beam_size * batch_seq_len);
+      int _remainder = i % (beam_size * batch_seq_len);
+      int beam_id = _remainder / batch_seq_len;
+      int batch_seq_id = _remainder % batch_seq_len;
+
+      half2 val = p_q_b[targetid_3dim(head_id, batch_id * beam_size + beam_id,
+                                      0, gridDim.x, 1)];
+      size_t _tgt_idx =
+          targetid_3dim(batch_id, head_id * beam_size + beam_id, batch_seq_id,
+                        head_num * beam_size, batch_seq_len);
       p_attn_weights[_tgt_idx] = __hadd2(p_attn_weights[_tgt_idx], val);
     }
   }
 }
 
 template <typename T>
-void ker_arrange_encdec_q_b_attn_weights_launcher(cudaStream_t stream,
-                                                  const T* q_b, T* attn_weights,
-                                                  int beam_size, int head_num,
-                                                  int batch_seq_len,
-                                                  int batch_size) {
+void ker_arrange_encdec_q_b_attn_weights_launcher(
+    cudaStream_t stream, const T* q_b, T* attn_weights, int beam_size,
+    int head_num, int batch_seq_len, int batch_size, int max_thread_per_block) {
   ker_arrange_encdec_q_b_attn_weights<T>
-      <<<batch_size * beam_size, head_num, 0, stream>>>(
-          q_b, attn_weights, beam_size, head_num, batch_seq_len);
+      <<<head_num, max_thread_per_block, 0, stream>>>(
+          q_b, attn_weights, beam_size, head_num, batch_seq_len,
+          batch_size * beam_size);
 }
 
 template <>
 void ker_arrange_encdec_q_b_attn_weights_launcher<__half>(
     cudaStream_t stream, const __half* q_b, __half* attn_weights, int beam_size,
-    int head_num, int batch_seq_len, int batch_size) {
+    int head_num, int batch_seq_len, int batch_size, int max_thread_per_block) {
   ker_arrange_encdec_q_b_attn_weights<__half>
-      <<<batch_size * beam_size, head_num, 0, stream>>>(
-          q_b, attn_weights, beam_size, head_num, batch_seq_len);
+      <<<head_num, max_thread_per_block, 0, stream>>>(
+          q_b, attn_weights, beam_size, head_num, batch_seq_len, batch_size);
 }
 
 template void ker_arrange_encdec_q_b_attn_weights_launcher<float>(
     cudaStream_t stream, const float* q_b, float* attn_weights, int beam_size,
-    int head_num, int batch_seq_len, int batch_size);
+    int head_num, int batch_seq_len, int batch_size, int max_thread_per_block);
 
 template void ker_arrange_encdec_q_b_attn_weights_launcher<__half>(
     cudaStream_t stream, const __half* q_b, __half* attn_weights, int beam_size,
-    int head_num, int batch_seq_len, int batch_size);
+    int head_num, int batch_seq_len, int batch_size, int max_thread_per_block);
 
 /**
 @brief: ker_correlation_softmax_encself

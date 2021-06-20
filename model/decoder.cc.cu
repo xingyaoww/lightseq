@@ -654,7 +654,8 @@ void Decoder<OpType_>::encdec_attention() {
   // (attn_weights = attn_weights + q_b)
   ker_arrange_encdec_q_b_attn_weights_launcher<_DataType>(
       _stream, _p_d_query_buf1 /* input q_b for reshape */, _p_d_c /* output */,
-      _tw._beam_size, _tw._head_num, _batch_seq_len, _batch_size);
+      _tw._beam_size, _tw._head_num, _batch_seq_len, _batch_size,
+      _max_thread_per_block);
 
   // 2.6 perform softmax to get attn_probs
   ker_correlation_softmax_encdec_launcher<_DataType>(

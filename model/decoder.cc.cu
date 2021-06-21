@@ -694,7 +694,7 @@ void Decoder<OpType_>::encdec_attention() {
       _p_d_query_buf2, _tw._beam_size, _tw._hidden_size, _tw._head_num,
       _batch_size, _max_thread_per_block);
 
-  // 3.2 FFN_i^O(X) = X * W_i^V * W_i^O
+  // 3.3 X * W_i^V + b_i^V
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
       _hd, CUBLAS_OP_N, CUBLAS_OP_T, _batch_size * _tw._beam_size,
       _tw._dim_per_head, _tw._hidden_size,
@@ -723,9 +723,25 @@ void Decoder<OpType_>::encdec_attention() {
 
       /*batchCount*/ _tw._head_num, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  // TODO: reshape X * W_i^V to [batch_size * beam_size, head_num *
-  // dim_per_head]
-  // TODO: workout (X * W_i^V) * W_i^O
+
+  // reshape X * W_i^V to [1, batch_size * beam_size, head_num *
+  // dim_per_head] and add with b_i^V (bias of W_V)
+  ker_arrange_encdec_X_postmatmul_launcher(
+      _stream,
+
+      /* input X * W_i^V [head_num, batch_size * beam_size, dim_per_head] */
+      _p_d_query_buf1,
+
+      /* output X * W_i^V [1, batch_size * beam_size, head_num * dim_per_head]
+       */
+      _p_d_query_buf2,
+      /* encdec_v_bias of shape [1, 1, head_num * dim_per_head] */
+      _p_d_dec_wei[_weight_offset + 13],
+
+      _tw._beam_size, _tw._dim_per_head, _tw._head_num, _batch_size,
+      _max_thread_per_block);
+
+  // TODO: 3.4 Apply output projection on X * W_i^V + b_i^V
   // CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
   //   _hd, CUBLAS_OP_N, CUBLAS_OP_T, _batch_size * _tw._beam_size,
   //   /*TODO*/, _tw._dim_per_head,

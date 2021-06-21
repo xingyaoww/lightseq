@@ -1630,6 +1630,101 @@ template void ker_arrange_encdec_X_prematmul_launcher<__half>(
     int hidden_size, int head_num, int batch_size, int max_thread_per_block);
 
 /**
+@brief: ker_arrange_encdec_X_postmatmul
+reshape X * W_i^V [head_num, batch_size * beam_size, dim_per_head]
+into shape of [batch_size * beam_size, head_num * dim_per_head]
+to make head_num dim 0.
+and add w_v_bias to the resulting new_X.
+
+@thread
+gridDim.x = head_num
+gridDim.y = batch_size * beam_size
+blockDim.x = max_thread_per_block
+
+@param
+ori_X: [head_num, batch_size * beam_size, dim_per_head]
+new_X: [1, batch_size * beam_size, head_num * dim_per_head]
+w_v_bias: [1, 1, head_num * dim_per_head]
+
+beam_size: beam size of beam search
+dim_per_head: dim of one head in multi-head attention
+head_num: head number in multi-head attention
+*/
+template <typename T>
+__global__ void ker_arrange_encdec_X_postmatmul(const T* ori_X, T* new_X,
+                                                const T* w_v_bias,
+                                                int beam_size, int dim_per_head,
+                                                int head_num) {
+  int batch_size = gridDim.y / beam_size;
+  int head_id = blockIdx.x;
+  int batch_id = blockIdx.y / beam_size;
+  int beam_id = blockIdx.y % beam_size;
+  for (std::size_t dim_id = threadIdx.x; dim_id < dim_per_head;
+       dim_id += blockDim.x) {
+    new_X[(batch_id * beam_size + beam_id) * (head_num * dim_per_head) +
+          (head_id * dim_per_head + dim_id)] =
+        ori_X[targetid_3dim(head_id, batch_id * beam_size + beam_id, dim_id,
+                            batch_size * beam_size, dim_per_head)] +
+        w_v_bias[(head_id * dim_per_head + dim_id)];
+  }
+}
+
+template <>
+__global__ void ker_arrange_encdec_X_postmatmul<__half>(
+    const __half* ori_X, __half* new_X, const __half* w_v_bias, int beam_size,
+    int dim_per_head, int head_num) {
+  int batch_size = gridDim.y / beam_size;
+  int head_id = blockIdx.x;
+  int batch_id = blockIdx.y / beam_size;
+  int beam_id = blockIdx.y % beam_size;
+  const half2* p_ori_X = (const half2*)ori_X;
+  const half2* p_w_v_bias = (const half2*)w_v_bias;
+  for (std::size_t dim_id = threadIdx.x; dim_id < dim_per_head;
+       dim_id += blockDim.x) {
+    ((half2*)
+         new_X)[(batch_id * beam_size + beam_id) * (head_num * dim_per_head) +
+                (head_id * dim_per_head + dim_id)] =
+        _hadd2(p_ori_X[targetid_3dim(head_id, batch_id * beam_size + beam_id,
+                                     dim_id, batch_size * beam_size,
+                                     dim_per_head)],
+               p_w_v_bias[(head_id * dim_per_head + dim_id)]);
+  }
+}
+
+template <typename T>
+void ker_arrange_encdec_X_postmatmul_launcher(cudaStream_t stream,
+                                              const T* ori_X, T* new_X,
+                                              const T* w_v_bias, int beam_size,
+                                              int dim_per_head, int head_num,
+                                              int batch_size,
+                                              int max_thread_per_block) {
+  ker_arrange_encdec_X_postmatmul<T>
+      <<<dim3(head_num, batch_size * beam_size), max_thread_per_block, 0,
+         stream>>>(ori_X, new_X, w_v_bias, beam_size, dim_per_head, head_num);
+}
+
+template <>
+void ker_arrange_encdec_X_postmatmul_launcher<__half>(
+    cudaStream_t stream, const __half* ori_X, __half* new_X,
+    const __half* w_v_bias, int beam_size, int dim_per_head, int head_num,
+    int batch_size, int max_thread_per_block) {
+  ker_arrange_encdec_X_postmatmul<__half>
+      <<<dim3(head_num, batch_size * beam_size), max_thread_per_block, 0,
+         stream>>>(ori_X, new_X, w_v_bias, beam_size, dim_per_head / 2,
+                   head_num);
+}
+
+template void ker_arrange_encdec_X_postmatmul_launcher<float>(
+    cudaStream_t stream, const float* ori_X, float* new_X,
+    const float* w_v_bias, int beam_size, int dim_per_head, int head_num,
+    int batch_size, int max_thread_per_block);
+
+template void ker_arrange_encdec_X_postmatmul_launcher<__half>(
+    cudaStream_t stream, const __half* ori_X, __half* new_X,
+    const __half* w_v_bias, int beam_size, int dim_per_head, int head_num,
+    int batch_size, int max_thread_per_block);
+
+/**
 @brief: ker_arrange_atten_output
 reshape Scaled Dot-Product Attention output.
 It will be used by both encoder and decoder

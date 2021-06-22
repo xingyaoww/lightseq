@@ -567,27 +567,26 @@ void Decoder<OpType_>::encdec_attention() {
 
   // output q_w (in _p_d_query_buf2) shape [head_num, batch_size * beam_size,
   // head_num * dim_per_head]
-  // TODO: fix column-major matrix multiplication issue
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _batch_size * _tw._beam_size,
-      _tw._head_num * _tw._dim_per_head, _tw._dim_per_head,
+      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _tw._head_num * _tw._dim_per_head,
+      _batch_size * _tw._beam_size, _tw._dim_per_head,
       /*alpha*/ &_atten_scaler,
 
-      _p_d_query_buf3 /*A: [head_num, batch_size * beam_size, dim_per_head]*/,
-      _AType, /*lda*/ _batch_size * _tw._beam_size,
-      /*strideA*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
-
       _p_d_dec_wei[_weight_offset +
-                   10] /*B [head_num, dim_per_head, head_num * dim_per_head] */,
+                   10] /*A [head_num, dim_per_head, head_num * dim_per_head] */,
+      _AType, /*lda*/ _tw._head_num * _tw._dim_per_head,
+      /*strideA*/ _tw._dim_per_head * _tw._head_num * _tw._dim_per_head,
+
+      _p_d_query_buf3 /*B: [head_num, batch_size * beam_size, dim_per_head] */,
       _BType, /*ldb*/ _tw._dim_per_head,
-      /*strideB*/ _tw._dim_per_head * _tw._head_num * _tw._dim_per_head,
+      /*strideB*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
 
       /*beta*/ &_type_zero,
 
       _p_d_query_buf2 /*C [head_num, batch_size * beam_size, head_num *
                          dim_per_head]*/
       ,
-      _CType, /*ldc*/ _batch_size * _tw._beam_size,
+      _CType, /*ldc*/ _tw._head_num * _tw._dim_per_head,
       /*strideC*/ _batch_size * _tw._beam_size * _tw._head_num *
           _tw._dim_per_head,
 
@@ -605,31 +604,31 @@ void Decoder<OpType_>::encdec_attention() {
   // 2.3 attn_weights =  q_w * raw_K^T
   // new_q_w: [batch_size, head_num * beam_size, head_num * dim_per_head]
   // raw_K (hidden_state from encoder) in _p_d_encoder_output: [batch_size,
-  // batch_seq_len, _tw._hidden_size] (output) attn_weights: [batch_size,
-  // head_num * beam_size, batch_seq_len], it can fit in _p_d_c as _tw._max_step
-  // >= batch_seq_len
+  // batch_seq_len, _tw._hidden_size]
+  // (output) attn_weights: [batch_size, head_num * beam_size, batch_seq_len],
+  // it can fit in _p_d_c as _tw._max_step >= batch_seq_len
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_T, _tw._head_num * _tw._beam_size,
-      _batch_seq_len, _tw._hidden_size,
+      _hd, CUBLAS_OP_T, CUBLAS_OP_N, _batch_seq_len,
+      _tw._head_num * _tw._beam_size, _tw._hidden_size,
       /*alpha*/ &_type_one,
 
-      _p_d_query_buf1 /*A (new_q_w): [batch_size, head_num * beam_size, head_num
-                       * dim_per_head]*/
-      ,
-      _AType, /*lda*/ _tw._head_num * _tw._beam_size,
-      /*strideA*/ _tw._head_num * _tw._beam_size * _tw._head_num *
-          _tw._dim_per_head,
-
-      _p_d_encoder_output /*B (transposed raw_K) [batch_size, _tw._hidden_size,
+      _p_d_encoder_output /*A (transposed raw_K) [batch_size, _tw._hidden_size,
                              batch_seq_len] */
       ,
-      _BType, /*ldb TODO: check for potential error here*/ _tw._hidden_size,
-      /*strideB*/ _tw._hidden_size * _batch_seq_len,
+      _AType, /*lda*/ _batch_seq_len,
+      /*strideA*/ _tw._hidden_size * _batch_seq_len,
+
+      _p_d_query_buf1 /* B (new_q_w): [batch_size, head_num * beam_size,
+                       head_num * dim_per_head] */
+      ,
+      _BType, /*ldb*/ _tw._head_num * _tw._dim_per_head,
+      /*strideB*/ _tw._head_num * _tw._beam_size * _tw._head_num *
+          _tw._dim_per_head,
 
       /*beta*/ &_type_zero, _p_d_c /* output attn_weights [batch_size, head_num
                                     * beam_size, batch_seq_len]*/
       ,
-      _CType, /*ldc*/ _tw._head_num * _tw._beam_size,
+      _CType, /*ldc*/ _batch_seq_len,
       /*strideC*/ _tw._head_num * _tw._beam_size * _batch_seq_len,
 
       /*batchCount*/ _batch_size, _computeType, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
@@ -639,22 +638,22 @@ void Decoder<OpType_>::encdec_attention() {
   // dim_per_head, 1] q (in _p_d_query_buf3) is reshaped to [head_num,
   // batch_size * beam_size, dim_per_head]
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _batch_size * _tw._beam_size, 1,
+      _hd, CUBLAS_OP_N, CUBLAS_OP_N, 1, _batch_size * _tw._beam_size,
       _tw._dim_per_head,
-      /*alpha*/ &_atten_scaler,
-
-      _p_d_query_buf3 /*A: [head_num, batch_size * beam_size, dim_per_head]*/,
-      _AType, /*lda*/ _batch_size * _tw._beam_size,
-      /*strideA*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
+      /*alpha*/ &_type_one,
 
       _p_d_dec_wei[_weight_offset +
                    11] /* encdec_k_bias [head_num, dim_per_head, 1] */,
-      _BType, /*ldb*/ _tw._dim_per_head, /* strideB */ _tw._dim_per_head,
+      _AType, /*lda*/ 1, /* strideA */ _tw._dim_per_head,
+
+      _p_d_query_buf3 /*B: [head_num, batch_size * beam_size, dim_per_head]*/,
+      _BType, /*ldb*/ _tw._dim_per_head,
+      /*strideB*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
 
       /*beta*/ &_type_zero,
 
       _p_d_query_buf1 /* output q_b [head_num, batch_size * beam_size, 1] */,
-      _CType, /*ldc*/ _batch_size * _tw._beam_size,
+      _CType, /*ldc*/ 1,
       /*strideC*/ _batch_size * _tw._beam_size,
 
       /*batchCount*/ _tw._head_num, _computeType,
@@ -675,21 +674,21 @@ void Decoder<OpType_>::encdec_attention() {
   /* ---step 3. apply output projection --- */
   // 3.1 X (_p_d_query_buf1) = attn_probs * rawV (hidden_states from encoder)
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_T, _tw._head_num * _tw._beam_size,
-      _batch_seq_len, _tw._hidden_size, &_type_one,
+      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _tw._hidden_size,
+      _tw._head_num * _tw._beam_size, _batch_seq_len, &_type_one,
+
+      /* rawV (rawV in EL-Attention, i.e. hidden_states from encoder)
+         [batch_size, batch_seq_len, _tw._hidden_size] */
+      _p_d_encoder_output, _AType, /* lda */ _tw._hidden_size,
+      /* strideA */ _batch_seq_len * _tw._hidden_size,
 
       /* attn_probs [batch_size, head_num * beam_size, batch_seq_len] */
-      _p_d_c, /* lda */ _tw._head_num * _tw._beam_size,
-      /* strideA */ _tw._head_num * _tw._beam_size * _batch_seq_len,
-
-      /* rawV (transposed rawV in EL-Attention, i.e. hidden_states from encoder)
-         [batch_size, batch_seq_len, _tw._hidden_size] */
-      _p_d_encoder_output, _BType, /* ldb */ _batch_seq_len,
-      /* strideB */ _batch_seq_len * _tw._hidden_size,
+      _p_d_c, _BType, /* ldb */ _batch_seq_len,
+      /* strideB */ _tw._head_num * _tw._beam_size * _batch_seq_len,
 
       &_type_zero,
       /* output [batch_size, head_num * beam_size, _tw._hidden_size] */
-      _p_d_query_buf1, _CType, /* ldc */ _tw._head_num * _tw._beam_size,
+      _p_d_query_buf1, _CType, /* ldc */ _tw._hidden_size,
       /* strideC */ _tw._head_num * _tw._beam_size * _tw._hidden_size,
 
       /* batchCount */ _batch_size, _computeType,
@@ -706,29 +705,28 @@ void Decoder<OpType_>::encdec_attention() {
 
   // 3.3 X * W_i^V + b_i^V
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_T, _batch_size * _tw._beam_size,
-      _tw._dim_per_head, _tw._hidden_size,
+      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _tw._dim_per_head,
+      _batch_size * _tw._beam_size, _tw._hidden_size,
       /*alpha*/ &_atten_scaler,
+
+      _p_d_dec_wei[_weight_offset + 12] /* encdec_v_kernel
+                           [head_num, head_num * dim_per_head, dim_per_head] */
+      ,
+      _AType, /*lda*/ _tw._dim_per_head,
+      /*strideA*/ _tw._head_num * _tw._dim_per_head * _tw._dim_per_head,
 
       _p_d_query_buf2 /* X: [head_num, batch_size * beam_size, _tw._hidden_size]
                        */
       ,
-      _AType, /*lda*/ _batch_size * _tw._beam_size,
+      _BType, /*ldb*/ _tw._hidden_size,
       /*strideA*/ _batch_size * _tw._beam_size * _tw._hidden_size,
-
-      _p_d_dec_wei[_weight_offset +
-                   12] /* (transposed) encdec_v_kernel [head_num, head_num *
-                          dim_per_head, dim_per_head] */
-      ,
-      _BType, /*ldb*/ _tw._head_num * _tw._dim_per_head,
-      /*strideB*/ _tw._head_num * _tw._dim_per_head * _tw._dim_per_head,
 
       /*beta*/ &_type_zero,
 
       _p_d_query_buf1 /* X * W_i^V [head_num, batch_size * beam_size,
                          dim_per_head]*/
       ,
-      _CType, /*ldc*/ _batch_size * _tw._beam_size,
+      _CType, /*ldc*/ _tw._dim_per_head,
       /*strideC*/ _batch_size * _tw._beam_size * _tw._dim_per_head,
 
       /*batchCount*/ _tw._head_num, _computeType,

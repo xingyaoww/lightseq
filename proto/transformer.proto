@@ -48,24 +48,21 @@ message DecoderLayer {
   repeated float self_project_bias_output = 6;    // [hidden_size]
 
   // decoder-encode-attention
-  repeated float encdec_norm_scale = 7;         // [hidden_size]
-  repeated float encdec_norm_bias = 8;          // [hidden_size]
-  repeated float encdec_project_kernel_q = 9;   // [hidden_size, hidden_size]
-  repeated float encdec_project_bias_q = 10;    // [hidden_size]
-  repeated float encdec_project_kernel_k = 11;  // [hidden_size, hidden_size]
-  repeated float encdec_project_bias_k = 12;    // [hidden_size]
-  repeated float encdec_project_kernel_v = 13;  // [hidden_size, hidden_size]
-  repeated float encdec_project_bias_v = 14;    // [hidden_size]
-  repeated float encdec_project_kernel_output = 15; // [hidden_size, hidden_size]
-  repeated float encdec_project_bias_output = 16;  // [hidden_size]
+  repeated float encdec_norm_scale = 7;        // [hidden_size]
+  repeated float encdec_norm_bias = 8;         // [hidden_size]
+  repeated float encdec_project_kernel_q = 9;  // [hidden_size, hidden_size]
+  repeated float encdec_project_bias_q = 10;   // [hidden_size]
+  repeated float encdec_project_kernel_output =
+      11;                                          // [hidden_size, hidden_size]
+  repeated float encdec_project_bias_output = 12;  // [hidden_size]
 
   // "Feed-Forward Networks"
-  repeated float ffn_norm_scale = 17;     // [hidden_size]
-  repeated float ffn_norm_bias = 18;      // [hidden_size]
-  repeated float ffn_first_kernel = 19;   // [hidden_size, inner_size]
-  repeated float ffn_first_bias = 20;     // [inner_size]
-  repeated float ffn_second_kernel = 21;  // [inner_size, hidden_size]
-  repeated float ffn_second_bias = 22;    // [hidden_size]
+  repeated float ffn_norm_scale = 13;     // [hidden_size]
+  repeated float ffn_norm_bias = 14;      // [hidden_size]
+  repeated float ffn_first_kernel = 15;   // [hidden_size, inner_size]
+  repeated float ffn_first_bias = 16;     // [inner_size]
+  repeated float ffn_second_kernel = 17;  // [inner_size, hidden_size]
+  repeated float ffn_second_bias = 18;    // [hidden_size]
 }
 
 message EmbeddingLayer {
@@ -107,14 +104,14 @@ message ModelConf {
   float length_penalty = 4;  // length penalty of beam search
   int32 src_padding_id = 5;  // source padding id
   int32 trg_start_id = 6;    // target start id
-  float diverse_lambda = 7;  // diverse beam search lambda
-  string sampling_method = 8;  // choice of beam_search, topk, topp, topk_greedy
-  float topp = 9;              // parameter for topp sampling
-  int32 topk = 10;             // parameter for topk sampling
-  int32 trg_end_id = 11;       // eos of target embedding
-  bool is_post_ln = 12;        // Pre-LN or Post-LN
-  bool no_scale_embedding = 13;  // whether to scale embedding by sqrt(emb_dim)
-  bool use_gelu = 14;            // use gelu for activation otherwise relu
+  float diverse_lambda = 7; // diverse beam search lambda
+  string sampling_method = 8; // choice of beam_search, topk, topp, topk_greedy
+  float topp = 9; // parameter for topp sampling
+  int32 topk = 10; // parameter for topk sampling
+  int32 trg_end_id = 11; // eos of target embedding
+  bool is_post_ln = 12; // Pre-LN or Post-LN
+  bool no_scale_embedding = 13; // whether to scale embedding by sqrt(emb_dim)
+  bool use_gelu = 14; // use gelu for activation otherwise relu
   // Whether it is a multilingual model.
   // If it is set to true, lang_emb and trg_vocab_mask should be non-empty.
   bool is_multilingual = 15;

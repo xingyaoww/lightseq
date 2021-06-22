@@ -101,6 +101,17 @@ void ker_arrange_encdec_q_launcher(int step_token_num, int hidden_size,
                                    int max_thread_per_block);
 
 template <typename T>
+void ker_arrange_encdec_q_w_launcher(int step_token_num, int hidden_size,
+                                     cudaStream_t stream, const T* ori_q_w,
+                                     T* new_q_w, int beam_size,
+                                     int dim_per_head, int head_num,
+                                     int max_thread_per_block);
+template <typename T>
+void ker_arrange_encdec_q_b_attn_weights_launcher(
+    cudaStream_t stream, const T* q_b, T* attn_weights, int beam_size,
+    int head_num, int batch_seq_len, int batch_size, int max_thread_per_block);
+
+template <typename T>
 void ker_correlation_softmax_encself_launcher(int batch_size, int batch_seq_len,
                                               int head_num, cudaStream_t stream,
                                               T* correlation,
@@ -115,6 +126,21 @@ template <typename T>
 void ker_correlation_softmax_encdec_launcher(
     int batch_size, int head_num_per_seq, int batch_seq_len,
     cudaStream_t stream, T* correlation, const int* src_padding_mask);
+
+template <typename T>
+void ker_arrange_encdec_X_prematmul_launcher(cudaStream_t stream,
+                                             const T* ori_X, T* new_X,
+                                             int beam_size, int hidden_size,
+                                             int head_num, int batch_size,
+                                             int max_thread_per_block);
+
+template <typename T>
+void ker_arrange_encdec_X_postmatmul_launcher(cudaStream_t stream,
+                                              const T* ori_X, T* new_X,
+                                              const T* w_v_bias, int beam_size,
+                                              int dim_per_head, int head_num,
+                                              int batch_size,
+                                              int max_thread_per_block);
 
 template <typename T>
 void ker_arrange_atten_output_launcher(int batch_token_num, int hidden_size,

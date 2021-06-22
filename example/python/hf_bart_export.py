@@ -47,10 +47,6 @@ dec_layer_mapping_dict = OrderedDict(
         "encdec_norm_bias": "encoder_attn_layer_norm bias",
         "encdec_project_kernel_q": "encoder_attn q_proj weight&&expression_.transpose(0, 1)",
         "encdec_project_bias_q": "encoder_attn q_proj bias",
-        "encdec_project_kernel_k": "encoder_attn k_proj weight&&expression_.transpose(0, 1)",
-        "encdec_project_bias_k": "encoder_attn k_proj bias",
-        "encdec_project_kernel_v": "encoder_attn v_proj weight&&expression_.transpose(0, 1)",
-        "encdec_project_bias_v": "encoder_attn v_proj bias",
         "encdec_project_kernel_output": "encoder_attn out_proj weight&&expression_.transpose(0, 1)",
         "encdec_project_bias_output": "encoder_attn out_proj bias",
         "ffn_norm_scale": "final_layer_norm weight",
@@ -180,9 +176,8 @@ def extract_transformer_weights(
         transformer.src_embedding.token_embedding[:] = src_tb.flatten().tolist()
 
     # fill trg_embedding
-    # remove big matrix: encode_output_project_kernel_kv, encode_output_project_bias_kv
-    # encode_output_mapping_dict = _get_encode_output_mapping_dict(len(dec_tensor_names))
-    # trg_emb_mapping_dict.update(encode_output_mapping_dict)
+    encode_output_mapping_dict = _get_encode_output_mapping_dict(len(dec_tensor_names))
+    trg_emb_mapping_dict.update(encode_output_mapping_dict)
     fill_layer(
         dec_var_name_list,
         decoder_state_dict,

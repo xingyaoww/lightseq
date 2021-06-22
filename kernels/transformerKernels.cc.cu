@@ -1145,8 +1145,6 @@ __global__ void ker_arrange_encdec_q(const T* ori_q, const T* q_bias, T* new_q,
   int hidden_size = dim_per_head * head_num;
   for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     T val = ori_q[blockIdx.x * hidden_size + i] + __ldg(&q_bias[i]);
-    int batch_id = blockIdx.x / beam_size;
-    int beam_id = blockIdx.x % beam_size;
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
     new_q[targetid_3dim(head_id, blockIdx.x, dim_id, gridDim.x, dim_per_head)] =
@@ -1165,8 +1163,6 @@ __global__ void ker_arrange_encdec_q<__half>(const __half* ori_q,
     const half2* p_bias = (const half2*)q_bias;
     half2 val =
         __hadd2(p_q[blockIdx.x * half_hidden_size + i], __ldg(&p_bias[i]));
-    int batch_id = blockIdx.x / beam_size;
-    int beam_id = blockIdx.x % beam_size;
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
     ((half2*)new_q)[targetid_3dim(head_id, blockIdx.x, dim_id, gridDim.x,
@@ -1233,8 +1229,8 @@ __global__ void ker_arrange_encdec_q_w(const T* ori_q_w, T* new_q_w,
     int beam_id = blockIdx.y % beam_size;
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
-    new_q[targetid_3dim(batch_id, head_id * beam_size + beam_id, dim_id,
-                        gridDim.x * beam_size, hidden_size)] = val;
+    new_q_w[targetid_3dim(batch_id, head_id * beam_size + beam_id, dim_id,
+                          gridDim.x * beam_size, hidden_size)] = val;
   }
 }
 
@@ -1684,10 +1680,10 @@ __global__ void ker_arrange_encdec_X_postmatmul<__half>(
     ((half2*)
          new_X)[(batch_id * beam_size + beam_id) * (head_num * dim_per_head) +
                 (head_id * dim_per_head + dim_id)] =
-        _hadd2(p_ori_X[targetid_3dim(head_id, batch_id * beam_size + beam_id,
-                                     dim_id, batch_size * beam_size,
-                                     dim_per_head)],
-               p_w_v_bias[(head_id * dim_per_head + dim_id)]);
+        __hadd2(p_ori_X[targetid_3dim(head_id, batch_id * beam_size + beam_id,
+                                      dim_id, batch_size * beam_size,
+                                      dim_per_head)],
+                p_w_v_bias[(head_id * dim_per_head + dim_id)]);
   }
 }
 

@@ -136,7 +136,7 @@ std::string TransformerWeight<OpType_>::parse_emb_wei(
       _p_d_trg_emb_wei.push_back(
           thrust::raw_pointer_cast(_d_trg_emb_wei.data()) + e);
     }
-  } // trg
+  }  // trg
 
   if (_is_multilingual) {
     // fill in language embedding
@@ -150,7 +150,7 @@ std::string TransformerWeight<OpType_>::parse_emb_wei(
       _p_d_src_emb_wei.push_back(
           thrust::raw_pointer_cast(_d_src_lang_emb.data()));
     } else {
-      if (layer.lang_emb_size() / _hidden_size != 
+      if (layer.lang_emb_size() / _hidden_size !=
           layer.trg_vocab_mask_size() / _trg_vocab_size) {
         return "Wrong trg_lang_emb_size or trg_vocab_mask_size !";
       }
@@ -166,10 +166,10 @@ std::string TransformerWeight<OpType_>::parse_emb_wei(
 
     std::cout << "Finish loading multi lingual weights from host to device"
               << std::endl;
-  }  
+  }
 
-  std::cout << "Finish loading " << source
-            << "_emb_wei from host to device" << std::endl;
+  std::cout << "Finish loading " << source << "_emb_wei from host to device"
+            << std::endl;
   return "";
 }
 
@@ -284,6 +284,23 @@ std::string TransformerWeight<OpType_>::parse_dec_wei(
   std::vector<float> value;
   int idx = 0;
 
+  // encdec_kv_kernel, encdec_kv_bias will NOT be added to _p_d_trg_emb_wei
+  // instead, it will be sliced by layers, and add to decoder layers
+  const EmbeddingLayer &embedding_layer = transformer.trg_embedding();
+
+  // check shape of kv_kernel and kv_bias from trg_embedding
+  if (embedding_layer.encode_output_project_kernel_kv_size() !=
+      _hidden_size * _hidden_size * 2 * _n_dec_layer)
+    return "Wrong encode_output_project_kernel_kv_size !";
+  if (embedding_layer.encode_output_project_bias_kv_size() !=
+      _hidden_size * 2 * _n_dec_layer)
+    return "Wrong encode_output_project_bias_kv_size !";
+
+  // initialize the kernel_kv and bias_kv with type of RepeatedField< float >&
+  auto encdec_kv_kernel = embedding_layer.encode_output_project_kernel_kv();
+  auto encdec_kv_bias = embedding_layer.encode_output_project_bias_kv();
+
+  int layer_id = 0;
   for (auto dec_layer : transformer.decoder_stack()) {
     offset.push_back(idx);
     if (dec_layer.self_norm_scale_size() != _hidden_size)
@@ -348,28 +365,40 @@ std::string TransformerWeight<OpType_>::parse_dec_wei(
     for (float ele : dec_layer.encdec_project_bias_q()) value.push_back(ele);
     idx += _hidden_size;
 
+    // encdec_project_kernel_k [_hidden_size, 2 * _n_dec_layer * _hidden_size]
+    int encdec_kernel_col_width = 2 * _n_dec_layer * _hidden_size;
     offset.push_back(idx);
-    if (dec_layer.encdec_project_kernel_k_size() != _hidden_size * _hidden_size)
-      return "Wrong encdec_project_kernel_k size !";
-    for (float ele : dec_layer.encdec_project_kernel_k()) value.push_back(ele);
+    for (int i = 0; i < _hidden_size; ++i) {
+      for (int j = 0; j < _hidden_size; ++j) {
+        value.push_back(encdec_kv_kernel[i * encdec_kernel_col_width +
+                                         (j + (2 * layer_id * _hidden_size))]);
+      }
+    }
     idx += _hidden_size * _hidden_size;
 
+    // encdec_project_bias_k [2 * _n_dec_layer * _hidden_size]
     offset.push_back(idx);
-    if (dec_layer.encdec_project_bias_k_size() != _hidden_size)
-      return "Wrong encdec_project_bias_k size !";
-    for (float ele : dec_layer.encdec_project_bias_k()) value.push_back(ele);
+    for (int i = 0; i < _hidden_size; ++i) {
+      value.push_back(encdec_kv_bias[i + (2 * layer_id) * _hidden_size]);
+    }
     idx += _hidden_size;
 
+    // encdec_project_kernel_v [_hidden_size, 2 * _n_dec_layer * _hidden_size]
     offset.push_back(idx);
-    if (dec_layer.encdec_project_kernel_v_size() != _hidden_size * _hidden_size)
-      return "Wrong encdec_project_kernel_v size !";
-    for (float ele : dec_layer.encdec_project_kernel_v()) value.push_back(ele);
+    for (int i = 0; i < _hidden_size; ++i) {
+      for (int j = 0; j < _hidden_size; ++j) {
+        value.push_back(
+            encdec_kv_kernel[i * encdec_kernel_col_width +
+                             (j + ((2 * layer_id + 1) * _hidden_size))]);
+      }
+    }
     idx += _hidden_size * _hidden_size;
 
+    // encdec_project_bias_v [2 * _n_dec_layer * _hidden_size]
     offset.push_back(idx);
-    if (dec_layer.encdec_project_bias_v_size() != _hidden_size)
-      return "Wrong encdec_project_bias_v size !";
-    for (float ele : dec_layer.encdec_project_bias_v()) value.push_back(ele);
+    for (int i = 0; i < _hidden_size; ++i) {
+      value.push_back(encdec_kv_bias[i + (2 * layer_id + 1) * _hidden_size]);
+    }
     idx += _hidden_size;
 
     offset.push_back(idx);
@@ -423,7 +452,11 @@ std::string TransformerWeight<OpType_>::parse_dec_wei(
     for (float ele : dec_layer.ffn_second_bias()) value.push_back(ele);
     idx += _hidden_size;
 
+    layer_id += 1;
   }  // for
+  if (layer_id != _n_dec_layer) {
+    return "Unexpected number of decoder layers !";
+  }
 
   std::vector<_DataType> raw_value;
   for (float e : value) raw_value.push_back(float2required(e));
@@ -454,7 +487,8 @@ std::string TransformerWeight<OpType_>::initializing(std::string proto_path,
   get_model_config(transformer, only_decoder);
 
   if (_hidden_size % 4 != 0) {
-    return "hidden_size should be a multiple of 4 to avoid misaligned address in CUDA";
+    return "hidden_size should be a multiple of 4 to avoid misaligned address "
+           "in CUDA";
   }
 
   std::string res;
@@ -474,8 +508,7 @@ std::string TransformerWeight<OpType_>::initializing(std::string proto_path,
   res = parse_dec_wei(transformer);
   if (!res.empty()) return res;
 
-  std::cout << "Finish loading all weight from host to device"
-            << std::endl;
+  std::cout << "Finish loading all weight from host to device" << std::endl;
   // Optional:  Delete all global objects allocated by libprotobuf.
   // google::protobuf::ShutdownProtobufLibrary();
   return "";

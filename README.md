@@ -1,26 +1,28 @@
-# LightSeq: A High Performance Inference Library for Sequence Processing and Generation
+# LightSeq: A High Performance Library for Sequence Processing and Generation
 
 ![logo](https://raw.githubusercontent.com/bytedance/lightseq/master/docs/images/logo.png)
 
-[中文版本介绍](https://bytedance.feishu.cn/docs/doccnUJ5X9WWEdQxXwzbPJ581J0#)
+:tada: :tada: :tada: **LightSeq supports fast training for models in the Transformer family now,
+please check out [here](./lightseq/training/README.md) for details. [2021/06/18]**
 
-LightSeq is a high performance inference library for sequence processing and generation implemented
+[推理模块中文版本介绍](https://bytedance.feishu.cn/docs/doccnUJ5X9WWEdQxXwzbPJ581J0#)
+
+LightSeq is a high performance training and inference library for sequence processing and generation implemented
 in CUDA.
-It enables highly efficient computation of modern NLP models such as **BERT**, **GPT2**,
+It enables highly efficient computation of modern NLP models such as **BERT**, **GPT**,
 **Transformer**, etc.
 It is therefore best useful for *Machine Translation*, *Text Generation*, *Dialog*， *Language
-Modelling*, and other related tasks using these models.
+Modelling*, *Sentiment analysis*, and other related tasks with sequence data.
 
 The library is built on top of CUDA official
 library([cuBLAS](https://docs.nvidia.com/cuda/cublas/index.html),
 [Thrust](https://docs.nvidia.com/cuda/thrust/index.html), [CUB](http://nvlabs.github.io/cub/)) and
-custom kernel functions which are specially fused and optimized for these widely used models. In
-addition to model components, we also provide codes
-manage model weights trained from deepleanring framework and servers as a custom backend for
+custom kernel functions which are specially fused and optimized for Transformer model family. In
+addition to model components, the library also provide easy-to deploy model management and serving backend based on
 [TensorRT Inference
 Server](https://docs.nvidia.com/deeplearning/sdk/inference-server-archived/tensorrt_inference_server_120/tensorrt-inference-server-guide/docs/quickstart.html)(referred
-to as TRTIS in the later discussion). With LightSeq, you can easily deploy efficient model services or develop
-your own model architectures just with a little code modification.
+to as TRTIS in the later discussion).
+With LightSeq, one can easily develop modified Transformer architecture with little additional code.
 
 ## Features
 
@@ -28,7 +30,8 @@ your own model architectures just with a little code modification.
 - Various search methods, such as beam search, diverse beam search, topp/topk sampling.
 - Out-of-the-box rich middlewares for model service based on TRTIS, such as dynamic batch,
   multi-model on single GPU.
-- State of art inference performance compared with Deeplearning framework and other inference
+- Lightening fast training speed for supported models.
+- Lightening fast inference performance compared with Deeplearning framework and other inference
   libraries.
 
 The following is a support matrix of LightSeq compared with
@@ -37,9 +40,13 @@ The following is a support matrix of LightSeq compared with
 
 ![support](https://raw.githubusercontent.com/bytedance/lightseq/master/docs/images/support.png)
 
+## Code Structure
+At present, the code about **training** is in directory `./lightseq/training`, and other directories are all about **inference**.
+The training and inference parts are currently separate, and we will merge them in the near future.
+
 ## Performance
 
-Here, we show our experimental results on neural machine translation and text generation.
+Here are the experimental results on neural machine translation and text generation.
 The models of these two tasks are Transformer-base, but use beam search and sampling search methods
 respectively.
 We choose Tensorflow and
@@ -51,76 +58,32 @@ was used as the benchmark of Tensorflow.
 More results is available [here](./docs/performance.md).
 
 - Neural machine translation
-![nmt2](https://raw.githubusercontent.com/bytedance/lightseq/master/docs/images/nmt2.png)
-![nmt1](https://raw.githubusercontent.com/bytedance/lightseq/master/docs/images/nmt1.png)
+![nmt](https://raw.githubusercontent.com/bytedance/lightseq/master/docs/images/nmt.png)
 
 - Text generation
 ![generation](https://raw.githubusercontent.com/bytedance/lightseq/master/docs/images/generation.png)
 
-## Code Structure
-
-```shell
-├── CMakeLists.txt # cmake build file
-├── CONTRIBUTING.md 
-├── example
-│   ├── CMakeLists.txt
-│   ├── decoder_example.cc.cu # transformer decoder only example
-│   ├── gpt_generation.cc.cu # GPT generation example
-│   ├── gptlm_example.cc.cu # GPT language model example
-│   ├── transformer_example.cc.cu # Transformer translation example
-│   └── transformer_generate_example.cc.cu # Transformer generation example
-├── kernels
-│   ├── CMakeLists.txt
-│   ├── common.h # common kernel functions 
-│   ├── gptKernels.cc.cu # GPT kernel functions
-│   ├── gptKernels.h
-│   ├── transformerKernels.cc.cu # Transformer kernel functions
-│   └── transformerKernels.h
-├── LICENSE
-├── model
-│   ├── CMakeLists.txt
-│   ├── decoder.cc.cu # Transformer decoder
-│   ├── decoder.h
-│   ├── encoder.cc.cu # Transformer encoder
-│   ├── encoder.h
-│   ├── gpt_encoder.cc.cu # GPT encoder
-│   └── gpt_encoder.h
-├── NOTICE
-├── proto
-│   ├── CMakeLists.txt
-│   ├── gpt.proto # proto file to save GPT model
-│   ├── gpt_weight.cc # GPT weight class
-│   ├── gpt_weight.h
-│   ├── transformer.proto # # proto file to save Transformer model
-│   ├── transformer_weight.cc # Transformer weight class
-│   └── transformer_weight.h
-├── pywrapper
-│   ├── CMakeLists.txt
-│   ├── transformer.cc.cu # python wrapper for Transformer
-│   ├── transformer_decoder.cc.cu # python wrapper for Transformer decoder
-│   └── wrapper.cc # pybind registeration
-├── README.md
-├── server # custom engine for Triton
-│   ├── CMakeLists.txt
-│   ├── custom.h # Triton dependeny
-│   ├── decoder_generate_server.cc.cu
-│   ├── generate_server.cc.cu
-│   ├── gpt_generate_server.cc.cu
-│   ├── gptlm_server.cc.cu
-│   ├── libserver.ldscript # Triton dependeny
-│   ├── model_config_cuda.h # Triton dependeny
-│   ├── model_config.h # Triton dependeny
-│   ├── model_config.proto # Triton dependeny
-│   └── transformer_server.cc.cu 
-└── tools
-    ├── CMakeLists.txt
-    ├── util.cc.cu
-    └── util.h
-```
 
 ## Quick Start
 
-### Run from HuggingFace bart
+### Fast training from Fairseq
+
+You can experience lightning fast training by running following commands,
+Firstly install these requirements.
+
+```shell
+pip install lightseq fairseq sacremoses
+```
+
+Then you can train a translation task on wmt14 en2de dataset by running the following script
+
+```shell
+sh lightseq/training/examples/fairseq/ls_fairseq_wmt14en2de.sh
+```
+
+To compare lightseq with fairseq, delete the arguments with `ls_`prefix to using the original fairseq implementation
+
+### Fast inference from HuggingFace bart
 
 We provide an end2end bart-base example to see how fast Lightseq is compared to HuggingFace. First you should install these requirements.
 
@@ -159,7 +122,7 @@ Drop everything now. Meet me in the pouring rain. Kiss me on the sidewalk.
 
 LightSeq installation from pypi only supports python 3.6 to 3.8 on Linux for now. Consider compiling from source if you have other environments.
 
-### Run python wrapper
+### Inference python wrapper
 
 We provide python api to call lightseq, all you need is to install `lightseq` with `pip`, and make sure you have GPU driver not older than 418.40.04.
 
@@ -173,11 +136,11 @@ tar -zxvf transformer_weight.tar.gz
 Finally you can run lightseq in only a few lines!
 
 ```python
-import lightseq
+import lightseq.inference as lsi
 import numpy as np
 
 test_input = np.array([[5001, 2, 36, 5002]])
-transformer = lightseq.Transformer("transformer.pb", 32) # 32 is max batch size, it will decide GPU memory occupancy.
+transformer = lsi.Transformer("transformer.pb", 32) # 32 is max batch size, it will decide GPU memory occupancy.
 result = transformer.infer(test_input)
 ```
 
@@ -197,7 +160,7 @@ To avoid problems caused by inconsistent environments, you can use the pre-built
 
 ```shell
 docker pull nvcr.io/nvidia/tensorrtserver:19.05-py3
-# 
+#
 docker run --gpus '"device=0"' -it --rm -p8000:8000 -p8001:8001 -p8002:8002 -v
 /${current}/${path}:/quick_start nvcr.io/nvidia/tensorrtserver:19.05-py3 /bin/bash
 # inside container
@@ -278,19 +241,21 @@ work:
 
 ## Cite Us
 
-Our paper has been accepted by NAACL 2021 (Industry Track).
-If you use LightSeq in your research publication, please cite this paper.
+If you use LightSeq in your research, please cite the following paper.
 
 ```tex
-@article{wang2021lightseq,
-      title={LightSeq: A High Performance Inference Library for Transformers}, 
-      author={Xiaohui Wang and Ying Xiong and Yang Wei and Mingxuan Wang and Lei Li},
-      journal={arXiv preprint arXiv:2010.13887},
-      year={2021}
+@InProceedings{wang2021lightseq,
+  title = "{L}ight{S}eq: A High Performance Inference Library for Transformers",
+    author = "Wang, Xiaohui and Xiong, Ying and Wei, Yang and Wang, Mingxuan and Li, Lei",
+    booktitle = "Proceedings of the 2021 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies: Industry Papers (NAACL-HLT)",
+    month = jun,
+    year = "2021",
+    publisher = "Association for Computational Linguistics",
+    pages = "113--120",
 }
 ```
 
 ## Contact
 
-Any questions or suggestions, please feel free to contact us.
-wangxiaohui.neo@bytedance.com, xiongying.taka@bytedance.com, weiyang.god@bytedance.com
+Any questions or suggestions, please feel free to contact us at
+wangxiaohui.neo@bytedance.com, xiongying.taka@bytedance.com, weiyang.god@bytedance.com, wangmingxuan.89@bytedance.com, lileilab@bytedance.com

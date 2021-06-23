@@ -61,7 +61,7 @@ class Decoder {
   int* _p_d_result;
   int* _p_d_sample_unfinished;
   curandState* _p_d_curandstate;  //[batch_size]
-  const int* _p_d_token_id;  // source token id
+  const int* _p_d_token_id;       // source token id
 
   std::vector<float> _h_alive_seq_probs;
   std::vector<float> _h_length_norm;
@@ -104,15 +104,17 @@ class Decoder {
   int _batch_max_decode_length;
   bool _is_sampling;
 
-  const std::vector<const _DataType*>& _p_d_trg_emb_wei;  // {token_emb, position_emb, norm_scale, norm_bias, logit_bias} size: 5
+  const std::vector<const _DataType*>&
+      _p_d_trg_emb_wei;  // {token_emb, position_emb, norm_scale, norm_bias,
+                         // logit_bias} size: 5
   const std::vector<const _DataType*>&
       _p_d_dec_wei;  // size: 18 * dec_layer_num
   const _DataType _type_one;
   const _DataType _type_zero;
   const float _fzero;
-  const _DataType _atten_scaler;  // scaling factor of Scaled Dot-Product Attention
+  const _DataType
+      _atten_scaler;          // scaling factor of Scaled Dot-Product Attention
   const float _logit_scaler;  // output scaling factor of the liner project
-                                   // after decoder
   const long _layer_size_self_k;
 
  public:
@@ -120,7 +122,7 @@ class Decoder {
           const _DataType* p_d_encoder_output, int* p_d_result,
           TransformerWeight<OpType_>& tw, cudaStream_t stream,
           cublasHandle_t hd, bool output_topk = false,
-          const int *p_d_token_id = nullptr);
+          const int* p_d_token_id = nullptr);
   long compute_buffer_bytesize();
   void init_buffer(void* pbuf);
   std::string check();

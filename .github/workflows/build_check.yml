@@ -5,6 +5,10 @@ name: build
 on:
   pull_request:
     branches: [master]
+  push:
+    paths-ignore:
+    - 'docs/**'
+    branches: [master]
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
@@ -29,3 +33,19 @@ jobs:
       - name: check format
         run: |
           pre-commit run -a --show-diff-on-failure
+
+  build_wheel:
+    runs-on: ubuntu-latest
+    container: taka23/lightseq:build-linux
+
+    steps:
+      - uses: actions/checkout@v1
+        with:
+          submodules: 'recursive'
+      - name: env check
+        run: |
+          /opt/python/cp38-cp38/bin/python -V
+      - name: build wheel
+        run: |
+          /opt/python/cp38-cp38/bin/python -m pip install -U build
+          /opt/python/cp38-cp38/bin/python -m build

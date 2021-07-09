@@ -683,6 +683,7 @@ void Decoder<OpType_>::encdec_attention() {
       /* strideA */ _batch_seq_len * _tw._hidden_size,
 
       /* attn_probs [batch_size, head_num * beam_size, batch_seq_len] */
+      _p_d_c, _BType, /* ldb */ _batch_seq_len,
       /* strideB */ _tw._head_num * _tw._beam_size * _batch_seq_len,
 
       &_type_zero,
@@ -747,15 +748,16 @@ void Decoder<OpType_>::encdec_attention() {
       _p_d_dec_wei[_weight_offset + 13],
 
       _tw._beam_size, _tw._dim_per_head, _tw._head_num, _batch_size,
-      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _tw._dim_per_head, _tw._beam_size,
-      _batch_seq_len, &_type_one, _p_d_encdec_v_bgeem[_layer_id], _AType,
-      _tw._dim_per_head, _batch_seq_len * _tw._dim_per_head, _p_d_c, _BType,
-      _batch_seq_len, _tw._beam_size * _batch_seq_len, &_type_zero,
-      _p_d_query_buf1, _CType, _tw._dim_per_head,
-      _tw._beam_size * _tw._dim_per_head, _batch_size * _tw._head_num,
-      _computeType, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
-  ker_arrange_atten_output_launcher<_DataType>(
-      _step_token_num, _tw._hidden_size, _stream, _p_d_query_buf1,
+      _max_thread_per_block);
+
+  /* ---step 4. Apply output projection on (X * W_i^V + b_i^V) --- */
+  // NOTE: reshape work in ker_arrange_atten_output_launcher
+  // has already been done in ker_arrange_encdec_X_postmatmul_launcher
+  // hence removing ker_arrange_atten_output_launcher here.
+
+  // attention in _p_d_query_buf2 was reshaped to [1, batch_size * beam_size,
+  // hidden_size]
+  CHECK_GPU_ERROR(cublasGemmEx(
       _hd, CUBLAS_OP_N, CUBLAS_OP_N,
 
       /*n*/ _tw._hidden_size, _step_token_num, _tw._hidden_size, &_type_one,

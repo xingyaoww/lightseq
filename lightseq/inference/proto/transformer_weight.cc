@@ -598,8 +598,7 @@ void TransformerWeight<OpType_>::hdf5_parse_emb_wei(hid_t hdf5_file,
   size_t value_size =
       vocab_size * _hidden_size + _max_step * _hidden_size + 2 * _hidden_size;
   if (source != "src") {
-    value_size += _hidden_size * _hidden_size * 2 * _n_dec_layer +
-                  _hidden_size * 2 * _n_dec_layer + vocab_size;
+    value_size += vocab_size;
   }
 
   std::vector<int> offset;
@@ -839,6 +838,7 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
       (_hidden_size * 2 + _hidden_size * _hidden_size * 3 + _hidden_size * 3 +
        _hidden_size * _hidden_size + _hidden_size * 3 +
        _hidden_size * _hidden_size + _hidden_size +
+       _hidden_size * _hidden_size * 2 + _hidden_size * 2 +
        _hidden_size * _hidden_size + _hidden_size * 3 +
        _hidden_size * _inner_size + _inner_size + _hidden_size * _inner_size +
        _hidden_size) *
@@ -950,10 +950,8 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
     offset.push_back(idx);
     for (int i = 0; i < _hidden_size; ++i) {
       for (int j = 0; j < _hidden_size; ++j) {
-        value.push_back(
-            encode_output_project_kernel_kv[i * encdec_kernel_col_width +
-                                            (j +
-                                             (2 * layer_id * _hidden_size))]);
+        value[idx + i * _hidden_size + j] = encode_output_project_kernel_kv
+            [i * encdec_kernel_col_width + (j + (2 * layer_id * _hidden_size))];
       }
     }
     idx += _hidden_size * _hidden_size;
@@ -961,8 +959,8 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
     // encdec_project_bias_k [2 * _n_dec_layer * _hidden_size]
     offset.push_back(idx);
     for (int i = 0; i < _hidden_size; ++i) {
-      value.push_back(
-          encode_output_project_bias_kv[i + (2 * layer_id) * _hidden_size]);
+      value[idx + i] =
+          encode_output_project_bias_kv[i + (2 * layer_id) * _hidden_size];
     }
     idx += _hidden_size;
 
@@ -970,10 +968,10 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
     offset.push_back(idx);
     for (int i = 0; i < _hidden_size; ++i) {
       for (int j = 0; j < _hidden_size; ++j) {
-        value.push_back(
+        value[idx + i * _hidden_size + j] =
             encode_output_project_kernel_kv[i * encdec_kernel_col_width +
                                             (j + ((2 * layer_id + 1) *
-                                                  _hidden_size))]);
+                                                  _hidden_size))];
       }
     }
     idx += _hidden_size * _hidden_size;
@@ -981,8 +979,8 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
     // encdec_project_bias_v [2 * _n_dec_layer * _hidden_size]
     offset.push_back(idx);
     for (int i = 0; i < _hidden_size; ++i) {
-      value.push_back(
-          encode_output_project_bias_kv[i + (2 * layer_id + 1) * _hidden_size]);
+      value[idx + i] =
+          encode_output_project_bias_kv[i + (2 * layer_id + 1) * _hidden_size];
     }
     idx += _hidden_size;
 

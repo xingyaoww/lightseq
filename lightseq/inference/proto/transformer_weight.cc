@@ -374,8 +374,9 @@ std::string TransformerWeight<OpType_>::proto_parse_dec_wei(
     offset.push_back(idx);
     for (int i = 0; i < _hidden_size; ++i) {
       for (int j = 0; j < _hidden_size; ++j) {
-        value.push_back(encdec_kv_kernel[i * encdec_kernel_col_width +
-                                         (j + (2 * layer_id * _hidden_size))]);
+        // kernel is transposed for further multiplication
+        value.push_back(encdec_kv_kernel[j * encdec_kernel_col_width +
+                                         (i + (2 * layer_id * _hidden_size))]);
       }
     }
     idx += _hidden_size * _hidden_size;
@@ -391,9 +392,10 @@ std::string TransformerWeight<OpType_>::proto_parse_dec_wei(
     offset.push_back(idx);
     for (int i = 0; i < _hidden_size; ++i) {
       for (int j = 0; j < _hidden_size; ++j) {
+        // kernel is transposed for further multiplication
         value.push_back(
-            encdec_kv_kernel[i * encdec_kernel_col_width +
-                             (j + ((2 * layer_id + 1) * _hidden_size))]);
+            encdec_kv_kernel[j * encdec_kernel_col_width +
+                             (i + ((2 * layer_id + 1) * _hidden_size))]);
       }
     }
     idx += _hidden_size * _hidden_size;
@@ -950,8 +952,9 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
     offset.push_back(idx);
     for (int i = 0; i < _hidden_size; ++i) {
       for (int j = 0; j < _hidden_size; ++j) {
+        // kernel is transposed for further multiplication
         value[idx + i * _hidden_size + j] = encode_output_project_kernel_kv
-            [i * encdec_kernel_col_width + (j + (2 * layer_id * _hidden_size))];
+            [j * encdec_kernel_col_width + (i + (2 * layer_id * _hidden_size))];
       }
     }
     idx += _hidden_size * _hidden_size;
@@ -968,9 +971,10 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
     offset.push_back(idx);
     for (int i = 0; i < _hidden_size; ++i) {
       for (int j = 0; j < _hidden_size; ++j) {
+        // kernel is transposed for further multiplication
         value[idx + i * _hidden_size + j] =
-            encode_output_project_kernel_kv[i * encdec_kernel_col_width +
-                                            (j + ((2 * layer_id + 1) *
+            encode_output_project_kernel_kv[j * encdec_kernel_col_width +
+                                            (i + ((2 * layer_id + 1) *
                                                   _hidden_size))];
       }
     }

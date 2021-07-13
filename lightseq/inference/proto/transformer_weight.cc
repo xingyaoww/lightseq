@@ -509,9 +509,14 @@ void TransformerWeight<OpType_>::hdf5_get_model_config(hid_t hdf5_file,
   read_hdf5_dataset_scalar(hdf5_file, "model_conf/head_num", H5T_NATIVE_INT,
                            &_head_num);
 
+  if (_hidden_size % _head_num != 0) {
+    throw std::runtime_error("Wrong head_num: hidden_size " +
+                             std::to_string(_hidden_size) + " % head_num " +
+                             std::to_string(_head_num) + " != 0.");
+  }
   _dim_per_head = _hidden_size / _head_num;
   _weight_per_enc_layer = 12;
-  _weight_per_dec_layer = 18;
+  _weight_per_dec_layer = 22;
 
   read_hdf5_dataset_scalar(hdf5_file, "model_conf/beam_size", H5T_NATIVE_INT,
                            &_beam_size);
@@ -642,25 +647,8 @@ void TransformerWeight<OpType_>::hdf5_parse_emb_wei(hid_t hdf5_file,
       _p_d_src_emb_wei.push_back(
           thrust::raw_pointer_cast(_d_src_emb_wei.data()) + e);
   } else {
-    // for trg, encdec_kv_kernel, encdec_kv_bias, logit_bias
-
-    offset.push_back(idx);
-    read_hdf5_dataset_data(
-        hdf5_file, dataset_prefix + "/encode_output_project_kernel_kv",
-        H5T_NATIVE_FLOAT, value.data() + idx,
-        [=](int size) {
-          return size != _hidden_size * _hidden_size * 2 * _n_dec_layer;
-        },
-        "Wrong encode_output_project_kernel_kv_size !");
-    idx += _hidden_size * _hidden_size * 2 * _n_dec_layer;
-
-    offset.push_back(idx);
-    read_hdf5_dataset_data(
-        hdf5_file, dataset_prefix + "/encode_output_project_bias_kv",
-        H5T_NATIVE_FLOAT, value.data() + idx,
-        [=](int size) { return size != _hidden_size * 2 * _n_dec_layer; },
-        "Wrong encode_output_project_bias_kv_size !");
-    idx += _hidden_size * 2 * _n_dec_layer;
+    // for trg, logit_bias
+    // encdec_kv_kernel, encdec_kv_bias will be processed in *_parse_dec_wei
 
     offset.push_back(idx);
     read_hdf5_dataset_data(
@@ -861,6 +849,25 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
             << " MB of decoder weight." << std::endl;
   int idx = 0;
 
+  // read encdec_kv_kernel and encdec_kv_bias and slice them for each layer
+  std::vector<float> encode_output_project_kernel_kv(
+      _hidden_size * _hidden_size * 2 * _n_dec_layer);
+  read_hdf5_dataset_data(
+      hdf5_file, "trg_embedding/encode_output_project_kernel_kv",
+      H5T_NATIVE_FLOAT, encode_output_project_kernel_kv.data(),
+      [=](int size) {
+        return size != _hidden_size * _hidden_size * 2 * _n_dec_layer;
+      },
+      "Wrong encode_output_project_kernel_kv_size !");
+
+  std::vector<float> encode_output_project_bias_kv(_hidden_size * 2 *
+                                                   _n_dec_layer);
+  read_hdf5_dataset_data(
+      hdf5_file, "trg_embedding/encode_output_project_bias_kv",
+      H5T_NATIVE_FLOAT, encode_output_project_bias_kv.data(),
+      [=](int size) { return size != _hidden_size * 2 * _n_dec_layer; },
+      "Wrong encode_output_project_bias_kv_size !");
+
   for (int layer_id = 0; layer_id < _n_enc_layer; ++layer_id) {
     std::string dataset_prefix = "decoder_stack/" + std::to_string(layer_id);
 
@@ -936,6 +943,47 @@ void TransformerWeight<OpType_>::hdf5_parse_dec_wei(hid_t hdf5_file) {
         hdf5_file, dataset_prefix + "/encdec_project_bias_q", H5T_NATIVE_FLOAT,
         value.data() + idx, [=](int size) { return size != _hidden_size; },
         "Wrong encdec_project_bias_q_size !");
+    idx += _hidden_size;
+
+    // encdec_project_kernel_k [_hidden_size, 2 * _n_dec_layer * _hidden_size]
+    int encdec_kernel_col_width = 2 * _n_dec_layer * _hidden_size;
+    offset.push_back(idx);
+    for (int i = 0; i < _hidden_size; ++i) {
+      for (int j = 0; j < _hidden_size; ++j) {
+        value.push_back(
+            encode_output_project_kernel_kv[i * encdec_kernel_col_width +
+                                            (j +
+                                             (2 * layer_id * _hidden_size))]);
+      }
+    }
+    idx += _hidden_size * _hidden_size;
+
+    // encdec_project_bias_k [2 * _n_dec_layer * _hidden_size]
+    offset.push_back(idx);
+    for (int i = 0; i < _hidden_size; ++i) {
+      value.push_back(
+          encode_output_project_bias_kv[i + (2 * layer_id) * _hidden_size]);
+    }
+    idx += _hidden_size;
+
+    // encdec_project_kernel_v [_hidden_size, 2 * _n_dec_layer * _hidden_size]
+    offset.push_back(idx);
+    for (int i = 0; i < _hidden_size; ++i) {
+      for (int j = 0; j < _hidden_size; ++j) {
+        value.push_back(
+            encode_output_project_kernel_kv[i * encdec_kernel_col_width +
+                                            (j + ((2 * layer_id + 1) *
+                                                  _hidden_size))]);
+      }
+    }
+    idx += _hidden_size * _hidden_size;
+
+    // encdec_project_bias_v [2 * _n_dec_layer * _hidden_size]
+    offset.push_back(idx);
+    for (int i = 0; i < _hidden_size; ++i) {
+      value.push_back(
+          encode_output_project_bias_kv[i + (2 * layer_id + 1) * _hidden_size]);
+    }
     idx += _hidden_size;
 
     offset.push_back(idx);

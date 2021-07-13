@@ -45,9 +45,11 @@ class TransformerWeight {
 
   // store the weights pointer
   std::vector<const _DataType *> _p_d_src_emb_wei;  // size: 4
-  std::vector<const _DataType *> _p_d_trg_emb_wei;  // size: 5 {token_emb, position_emb, norm_scale, norm_bias, logit_bias}
-  std::vector<const _DataType *> _p_d_enc_wei;      // size: 12 * enc_layer_num
-  std::vector<const _DataType *> _p_d_dec_wei;      // size: 22 * dec_layer_num
+  std::vector<const _DataType *>
+      _p_d_trg_emb_wei;  // size: 5 {token_emb, position_emb, norm_scale,
+                         // norm_bias, logit_bias}
+  std::vector<const _DataType *> _p_d_enc_wei;  // size: 12 * enc_layer_num
+  std::vector<const _DataType *> _p_d_dec_wei;  // size: 22 * dec_layer_num
 
   // store the weights on gpu memo
   thrust::device_vector<_DataType> _d_src_emb_wei;

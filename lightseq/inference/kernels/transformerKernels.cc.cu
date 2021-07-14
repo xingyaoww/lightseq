@@ -808,7 +808,7 @@ __global__ void ker_arrange_encself_qkv(const T* ori_qkv, const T* qkv_bias,
   int batch_id = blockIdx.x / batch_seq_len;
   int token_id = blockIdx.x % batch_seq_len;
   int qkv_offset = max_batch_dim * blockIdx.y;
-  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
     int target_id = targetid_4dim(batch_id, head_id, token_id, dim_id, head_num,
@@ -826,7 +826,7 @@ __global__ void ker_arrange_encself_qkv<__half>(
   int hidden_size = dim_per_head * head_num;
   int batch_id = blockIdx.x / batch_seq_len;
   int token_id = blockIdx.x % batch_seq_len;
-  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
     int qkv_offset = max_batch_dim * blockIdx.y;
@@ -907,7 +907,7 @@ __global__ void ker_arrange_decself_qkv(const T* ori_qkv, const T* qkv_bias,
                                         int head_num, int dim_per_head,
                                         int max_step, int step_id) {
   int hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     // blockdim is equal to hidden_size
     T val = ori_qkv[(blockIdx.x * gridDim.y + blockIdx.y) * hidden_size + i] +
             __ldg(&qkv_bias[blockIdx.y * hidden_size + i]);
@@ -939,7 +939,7 @@ __global__ void ker_arrange_decself_qkv<__half>(
   int half_hidden_size = dim_per_head * head_num;
   const half2* p_qkv = (const half2*)ori_qkv;
   const half2* p_bias = (const half2*)qkv_bias;
-  for (std::size_t i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
     half2 val = __hadd2(
         p_qkv[(blockIdx.x * gridDim.y + blockIdx.y) * half_hidden_size + i],
         __ldg(&p_bias[blockIdx.y * half_hidden_size + i]));
@@ -1029,7 +1029,7 @@ __global__ void ker_arrange_encdec_kv(const T* ori_kv, const T* kv_bias,
                                       int batch_seq_len, int dim_per_head,
                                       int head_num) {
   int hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     T val = ori_kv[(blockIdx.x * gridDim.y + blockIdx.y) * hidden_size + i] +
             __ldg(&kv_bias[blockIdx.y * hidden_size + i]);
     int seq_id = blockIdx.x / batch_seq_len;
@@ -1057,7 +1057,7 @@ __global__ void ker_arrange_encdec_kv<__half>(
     const __half* ori_kv, const __half* kv_bias, __half* new_k, __half* new_v,
     int offset_per_layer, int batch_seq_len, int dim_per_head, int head_num) {
   int half_hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
     const half2* p_ori_kv = (const half2*)ori_kv;
     const half2* p_kv_bias = (const half2*)kv_bias;
     half2 val = __hadd2(
@@ -1143,7 +1143,7 @@ __global__ void ker_arrange_encdec_q(const T* ori_q, const T* q_bias, T* new_q,
                                      int beam_size, int dim_per_head,
                                      int head_num) {
   int hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     T val = ori_q[blockIdx.x * hidden_size + i] + __ldg(&q_bias[i]);
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
@@ -1158,7 +1158,7 @@ __global__ void ker_arrange_encdec_q<__half>(const __half* ori_q,
                                              __half* new_q, int beam_size,
                                              int dim_per_head, int head_num) {
   int half_hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
     const half2* p_q = (const half2*)ori_q;
     const half2* p_bias = (const half2*)q_bias;
     half2 val =
@@ -1222,14 +1222,13 @@ __global__ void ker_arrange_encdec_q_w(const T* ori_q_w, T* new_q_w,
                                        int beam_size, int dim_per_head,
                                        int head_num) {
   int hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     T val = ori_q_w[targetid_3dim(blockIdx.x, blockIdx.y, i, gridDim.y,
                                   hidden_size)];
+    int head_id = blockIdx.x;
     int batch_id = blockIdx.y / beam_size;
     int beam_id = blockIdx.y % beam_size;
-    int head_id = i / dim_per_head;
-    int dim_id = i % dim_per_head;
-    new_q_w[targetid_3dim(batch_id, head_id * beam_size + beam_id, dim_id,
+    new_q_w[targetid_3dim(batch_id, head_id * beam_size + beam_id, i,
                           gridDim.x * beam_size, hidden_size)] = val;
   }
 }
@@ -1239,18 +1238,17 @@ __global__ void ker_arrange_encdec_q_w<__half>(const __half* ori_q_w,
                                                __half* new_q_w, int beam_size,
                                                int dim_per_head, int head_num) {
   int half_hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
     const half2* p_q = (const half2*)ori_q_w;
     half2 val = p_q[targetid_3dim(blockIdx.x, blockIdx.y, i, gridDim.y,
                                   half_hidden_size)];
 
-    int batch_id = blockIdx.x / beam_size;
-    int beam_id = blockIdx.x % beam_size;
-    int head_id = i / dim_per_head;
-    int dim_id = i % dim_per_head;
-    ((half2*)
-         new_q_w)[targetid_3dim(batch_id, head_id * beam_size + beam_id, dim_id,
-                                gridDim.x * beam_size, half_hidden_size)] = val;
+    int head_id = blockIdx.x;
+    int batch_id = blockIdx.y / beam_size;
+    int beam_id = blockIdx.y % beam_size;
+    ((half2*)new_q_w)[targetid_3dim(batch_id, head_id * beam_size + beam_id, i,
+                                    gridDim.x * beam_size, half_hidden_size)] =
+        val;
   }
 }
 
@@ -1591,8 +1589,7 @@ __global__ void ker_arrange_encdec_X_prematmul(const T* ori_X, T* new_X,
                                                int beam_size, int hidden_size,
                                                int head_num) {
   int batch_size = gridDim.x;
-  for (std::size_t dim_id = threadIdx.x; dim_id < hidden_size;
-       dim_id += blockDim.x) {
+  for (int dim_id = threadIdx.x; dim_id < hidden_size; dim_id += blockDim.x) {
     int batch_id = blockIdx.x;
     int head_id = blockIdx.y / beam_size;
     int beam_id = blockIdx.y % beam_size;
@@ -1610,7 +1607,7 @@ __global__ void ker_arrange_encdec_X_prematmul<__half>(const __half* ori_X,
                                                        int half_hidden_size,
                                                        int head_num) {
   int batch_size = gridDim.x;
-  for (std::size_t dim_id = threadIdx.x; dim_id < half_hidden_size;
+  for (int dim_id = threadIdx.x; dim_id < half_hidden_size;
        dim_id += blockDim.x) {
     int batch_id = blockIdx.x;
     int head_id = blockIdx.y / beam_size;
@@ -1683,8 +1680,7 @@ __global__ void ker_arrange_encdec_X_postmatmul(const T* ori_X, T* new_X,
   int head_id = blockIdx.x;
   int batch_id = blockIdx.y / beam_size;
   int beam_id = blockIdx.y % beam_size;
-  for (std::size_t dim_id = threadIdx.x; dim_id < dim_per_head;
-       dim_id += blockDim.x) {
+  for (int dim_id = threadIdx.x; dim_id < dim_per_head; dim_id += blockDim.x) {
     new_X[(batch_id * beam_size + beam_id) * (head_num * dim_per_head) +
           (head_id * dim_per_head + dim_id)] =
         ori_X[targetid_3dim(head_id, batch_id * beam_size + beam_id, dim_id,
@@ -1703,8 +1699,7 @@ __global__ void ker_arrange_encdec_X_postmatmul<__half>(
   int beam_id = blockIdx.y % beam_size;
   const half2* p_ori_X = (const half2*)ori_X;
   const half2* p_w_v_bias = (const half2*)w_v_bias;
-  for (std::size_t dim_id = threadIdx.x; dim_id < dim_per_head;
-       dim_id += blockDim.x) {
+  for (int dim_id = threadIdx.x; dim_id < dim_per_head; dim_id += blockDim.x) {
     ((half2*)
          new_X)[(batch_id * beam_size + beam_id) * (head_num * dim_per_head) +
                 (head_id * dim_per_head + dim_id)] =
@@ -1775,7 +1770,7 @@ __global__ void ker_arrange_atten_output(const T* ori_q, T* new_q,
   int batch_id = blockIdx.x / beam_size;
   // note, for encoder, beam_id is token_id; for decoder, beam_id is beam_id
   int beam_id = blockIdx.x % beam_size;
-  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
     new_q[blockIdx.x * hidden_size + i] = ori_q[targetid_4dim(
@@ -1792,7 +1787,7 @@ __global__ void ker_arrange_atten_output<__half>(const __half* ori_q,
   // note, for encoder, beam_id is token_id; for decoder, beam_id is beam_id
   int beam_id = blockIdx.x % beam_size;
   int half_hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
     const half2* p_ori_q = (const half2*)ori_q;
@@ -1970,7 +1965,7 @@ __global__ void ker_refresh_cache(const int* num_can_per_beam,
   int batch_id = beam_id_global / beam_size;
   int beam_id = beam_id_global % beam_size;
   int hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < hidden_size; i += blockDim.x) {
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
 
@@ -2012,7 +2007,7 @@ __global__ void ker_refresh_cache<__half>(
   int batch_id = beam_id_global / beam_size;
   int beam_id = beam_id_global % beam_size;
   int half_hidden_size = dim_per_head * head_num;
-  for (std::size_t i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
+  for (int i = threadIdx.x; i < half_hidden_size; i += blockDim.x) {
     int head_id = i / dim_per_head;
     int dim_id = i % dim_per_head;
 

@@ -671,6 +671,13 @@ void Decoder<OpType_>::encdec_attention() {
 
       /*batchCount*/ _batch_size, _computeType, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
+#ifdef DEBUG_RESULT
+  // output attn_weights [batch_size, head_num * beam_size, batch_seq_len]
+  print_vec(_p_d_c, "encdec attn attn_weights (head) ", 5);
+  print_vec(_p_d_c + _tw._head_num * _step_token_num * _batch_seq_len - 5,
+            "encdec attn attn_weights (tail) ", 5);
+#endif
+
   // 2.4 calculate q_b = Q_i (in _p_d_query_buf3) * (b_i^K)^T,
   // encdec_k_bias b_i^Q (in _p_d_dec_wei[_weight_offset + 11]): [head_num,
   // dim_per_head, 1] q (in _p_d_query_buf3) is reshaped to [head_num,
@@ -678,7 +685,7 @@ void Decoder<OpType_>::encdec_attention() {
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
       _hd, CUBLAS_OP_N, CUBLAS_OP_N, 1, _batch_size * _tw._beam_size,
       _tw._dim_per_head,
-      /*alpha*/ &_type_one,
+      /*alpha*/ &_atten_scaler,
 
       _p_d_dec_wei[_weight_offset +
                    11] /* encdec_k_bias [head_num, dim_per_head, 1] */,
@@ -696,6 +703,17 @@ void Decoder<OpType_>::encdec_attention() {
 
       /*batchCount*/ _tw._head_num, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+#ifdef DEBUG_RESULT
+  print_vec(_p_d_dec_wei[_weight_offset + 11],
+            "encdec attn k_proj_bias_t (head): ", 5);
+  print_vec(_p_d_dec_wei[_weight_offset + 11] + _tw._hidden_size - 5,
+            "encdec attn k_proj_bias_t (tail): ", 5);
+  // q_b [head_num, batch_size * beam_size, 1]
+  print_vec(_p_d_query_buf1, "encdec attn q_b (head): ", 5);
+  print_vec(_p_d_query_buf1 + _tw._head_num * _step_token_num - 5,
+            "encdec attn q_b (tail): ", 5);
+#endif
 
   // 2.5 reshape q_b, and add with `attn_weights` (in _p_d_c) inplace
   // (attn_weights = attn_weights + q_b)

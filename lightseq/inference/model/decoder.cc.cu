@@ -553,10 +553,25 @@ void Decoder<OpType_>::encdec_attention() {
 
       _p_d_query_buf2 /* [batch_size, batch_seq_len, _tw._hidden_size] */,
       _CType, _tw._hidden_size, _computeType, CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+#ifdef DEBUG_RESULT
+  print_vec(_p_d_query_buf2, "encdec attn query nobias (head): ", 5);
+  print_vec(_p_d_query_buf2 + _step_token_num * _tw._hidden_size - 5,
+            "encdec attn query nobias (tail): ", 5);
+#endif
+
   ker_arrange_encdec_q_launcher<_DataType>(
       _step_token_num, _tw._hidden_size, _stream, _p_d_query_buf2,
       _p_d_dec_wei[_weight_offset + 9], _p_d_query_buf3, _tw._beam_size,
       _tw._dim_per_head, _tw._head_num, _max_thread_per_block);
+
+#ifdef DEBUG_RESULT
+  // _step_token_num = batch_size * _tw._beam_size;
+  // new_q _p_d_query_buf3: [head_num, batch_size * beam_size, dim_per_head]
+  print_vec(_p_d_query_buf3, "encdec attn query reshaped (head): ", 5);
+  print_vec(_p_d_query_buf3 + _step_token_num * _tw._hidden_size - 5,
+            "encdec attn query reshaped (tail): ", 5);
+#endif
 
   /* ---step 2. correlation = q * k, perform softmax on correlation--- */
 
@@ -593,6 +608,20 @@ void Decoder<OpType_>::encdec_attention() {
       /*batchCount*/ _tw._head_num, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
+#ifdef DEBUG_RESULT
+  print_vec(_p_d_dec_wei[_weight_offset + 10],
+            "encdec attn k_proj_weight_t (head): ", 5);
+  print_vec(_p_d_dec_wei[_weight_offset + 10] +
+                _tw._hidden_size * _tw._hidden_size - 5,
+            "encdec attn k_proj_weight_t (tail): ", 5);
+  // _p_d_query_buf2 [head_num, batch_size * beam_size, head_num *
+  //  dim_per_head]
+  print_vec(_p_d_query_buf2, "encdec attn q_w (head): ", 5);
+  print_vec(
+      _p_d_query_buf2 + _tw._head_num * _step_token_num * _tw._hidden_size - 5,
+      "encdec attn q_w (tail): ", 5);
+#endif
+
   // 2.2 reshape q_w for downstream calculation (bring batch_size to dim0)
   ker_arrange_encdec_q_w_launcher<_DataType>(
       _step_token_num, _tw._hidden_size, _stream,
@@ -600,6 +629,15 @@ void Decoder<OpType_>::encdec_attention() {
       /* new_q_w [batch_size, head_num * beam_size, head_num * dim_per_head] */
       _p_d_query_buf1, _tw._beam_size, _tw._dim_per_head, _tw._head_num,
       _max_thread_per_block);
+
+#ifdef DEBUG_RESULT
+  // _p_d_query_buf1 [batch_size, head_num * beam_size,
+  //  head_num * dim_per_head]
+  print_vec(_p_d_query_buf1, "encdec attn q_w reshaped (head) ", 5);
+  print_vec(
+      _p_d_query_buf1 + _tw._head_num * _step_token_num * _tw._hidden_size - 5,
+      "encdec attn q_w reshaped (tail) ", 5);
+#endif
 
   // 2.3 attn_weights =  q_w * raw_K^T
   // new_q_w: [batch_size, head_num * beam_size, head_num * dim_per_head]
@@ -615,7 +653,7 @@ void Decoder<OpType_>::encdec_attention() {
       _p_d_encoder_output /*A (transposed raw_K) [batch_size, _tw._hidden_size,
                              batch_seq_len] */
       ,
-      _AType, /*lda*/ _batch_seq_len,
+      _AType, /*lda*/ _tw._hidden_size,
       /*strideA*/ _tw._hidden_size * _batch_seq_len,
 
       _p_d_query_buf1 /* B (new_q_w): [batch_size, head_num * beam_size,

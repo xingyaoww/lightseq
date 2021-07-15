@@ -1312,19 +1312,18 @@ __global__ void ker_arrange_encdec_q_b_attn_weights(const T* q_b,
   // and add with attn_weights: [batch_size, head_num * beam_size,
   // batch_seq_len]
   int head_id = blockIdx.x;
-  if (head_id < head_num) {
-    for (size_t i = threadIdx.x; i < batch_size * beam_size * batch_seq_len;
-         i += blockDim.x) {
-      int batch_id = i / (beam_size * batch_seq_len);
-      int _remainder = i % (beam_size * batch_seq_len);
-      int beam_id = _remainder / batch_seq_len;
-      int batch_seq_id = _remainder % batch_seq_len;
-      T val = q_b[targetid_3dim(head_id, batch_id * beam_size + beam_id, 0,
-                                gridDim.x, 1)];
-      attn_weights[targetid_3dim(batch_id, head_id * beam_size + beam_id,
-                                 batch_seq_id, head_num * beam_size,
-                                 batch_seq_len)] += val;
-    }
+  for (int i = threadIdx.x; i < batch_size * beam_size * batch_seq_len;
+       i += blockDim.x) {
+    int batch_id = i / (beam_size * batch_seq_len);
+    int _remainder = i % (beam_size * batch_seq_len);
+    int beam_id = _remainder / batch_seq_len;
+    int batch_seq_id = _remainder % batch_seq_len;
+    T val =
+        q_b[targetid_3dim(head_id, batch_id, beam_id, batch_size, beam_size)];
+
+    attn_weights[targetid_3dim(batch_id, head_id * beam_size + beam_id,
+                               batch_seq_id, head_num * beam_size,
+                               batch_seq_len)] += val;
   }
 }
 
@@ -1339,21 +1338,19 @@ __global__ void ker_arrange_encdec_q_b_attn_weights<__half>(
   int head_id = blockIdx.x;
   const half2* p_q_b = (const half2*)q_b;
   half2* p_attn_weights = (half2*)attn_weights;
-  if (head_id < head_num) {
-    for (size_t i = threadIdx.x; i < batch_size * beam_size * batch_seq_len;
-         i += blockDim.x) {
-      int batch_id = i / (beam_size * batch_seq_len);
-      int _remainder = i % (beam_size * batch_seq_len);
-      int beam_id = _remainder / batch_seq_len;
-      int batch_seq_id = _remainder % batch_seq_len;
+  for (int i = threadIdx.x; i < batch_size * beam_size * batch_seq_len;
+       i += blockDim.x) {
+    int batch_id = i / (beam_size * batch_seq_len);
+    int _remainder = i % (beam_size * batch_seq_len);
+    int beam_id = _remainder / batch_seq_len;
+    int batch_seq_id = _remainder % batch_seq_len;
 
-      half2 val = p_q_b[targetid_3dim(head_id, batch_id * beam_size + beam_id,
-                                      0, gridDim.x, 1)];
-      size_t _tgt_idx =
-          targetid_3dim(batch_id, head_id * beam_size + beam_id, batch_seq_id,
-                        head_num * beam_size, batch_seq_len);
-      p_attn_weights[_tgt_idx] = __hadd2(p_attn_weights[_tgt_idx], val);
-    }
+    half2 val =
+        p_q_b[targetid_3dim(head_id, batch_id, beam_id, batch_size, beam_size)];
+    int _tgt_idx =
+        targetid_3dim(batch_id, head_id * beam_size + beam_id, batch_seq_id,
+                      head_num * beam_size, batch_seq_len);
+    p_attn_weights[_tgt_idx] = __hadd2(p_attn_weights[_tgt_idx], val);
   }
 }
 
@@ -1363,8 +1360,7 @@ void ker_arrange_encdec_q_b_attn_weights_launcher(
     int head_num, int batch_seq_len, int batch_size, int max_thread_per_block) {
   ker_arrange_encdec_q_b_attn_weights<T>
       <<<head_num, max_thread_per_block, 0, stream>>>(
-          q_b, attn_weights, beam_size, head_num, batch_seq_len,
-          batch_size * beam_size);
+          q_b, attn_weights, beam_size, head_num, batch_seq_len, batch_size);
 }
 
 template <>

@@ -734,6 +734,13 @@ void Decoder<OpType_>::encdec_attention() {
       _batch_size, _tw._head_num * _tw._beam_size, _batch_seq_len, _stream,
       /*output attn_probs*/ _p_d_c, _p_d_padding_mask);
 
+#ifdef DEBUG_RESULT
+  // output attn_probs [batch_size, head_num * beam_size, batch_seq_len]
+  print_vec(_p_d_c, "encdec attn_probs (head) ", 5);
+  print_vec(_p_d_c + _tw._head_num * _step_token_num * _batch_seq_len - 5,
+            "encdec attn_probs (tail) ", 5);
+#endif
+
   /* ---step 3. apply output projection --- */
   // 3.1 X (_p_d_query_buf1) = attn_probs * rawV (hidden_states from encoder)
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
@@ -757,6 +764,14 @@ void Decoder<OpType_>::encdec_attention() {
       /* batchCount */ _batch_size, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
 
+#ifdef DEBUG_RESULT
+  // [batch_size, head_num * beam_size, _tw._hidden_size]
+  print_vec(_p_d_query_buf1, "encdec attn_h (head): ", 5);
+  print_vec(
+      _p_d_query_buf1 + _tw._head_num * _step_token_num * _tw._hidden_size - 5,
+      "encdec attn_h (tail): ", 5);
+#endif
+
   // 3.2 reshape X (move num_head to dim0) before calculate FFN^O
   ker_arrange_encdec_X_prematmul_launcher(
       _stream,
@@ -766,16 +781,24 @@ void Decoder<OpType_>::encdec_attention() {
       _p_d_query_buf2, _tw._beam_size, _tw._hidden_size, _tw._head_num,
       _batch_size, _max_thread_per_block);
 
+#ifdef DEBUG_RESULT
+  // [head_num, batch_size * beam_size, _tw._hidden_size]
+  print_vec(_p_d_query_buf2, "encdec attn_h reshaped (head): ", 5);
+  print_vec(
+      _p_d_query_buf2 + _tw._head_num * _step_token_num * _tw._hidden_size - 5,
+      "encdec attn_h reshaped (tail): ", 5);
+#endif
+
   // 3.3 X * W_i^V + b_i^V
   CHECK_GPU_ERROR(cublasGemmStridedBatchedEx(
-      _hd, CUBLAS_OP_N, CUBLAS_OP_N, _tw._dim_per_head,
+      _hd, CUBLAS_OP_T, CUBLAS_OP_N, _tw._dim_per_head,
       _batch_size * _tw._beam_size, _tw._hidden_size,
-      /*alpha*/ &_atten_scaler,
+      /*alpha*/ &_type_one,
 
-      _p_d_dec_wei[_weight_offset + 12] /* encdec_v_kernel
+      _p_d_dec_wei[_weight_offset + 12] /* (transposed) encdec_v_kernel
                            [head_num, head_num * dim_per_head, dim_per_head] */
       ,
-      _AType, /*lda*/ _tw._dim_per_head,
+      _AType, /*lda*/ _tw._head_num * _tw._dim_per_head,
       /*strideA*/ _tw._head_num * _tw._dim_per_head * _tw._dim_per_head,
 
       _p_d_query_buf2 /* X: [head_num, batch_size * beam_size, _tw._hidden_size]
@@ -794,6 +817,19 @@ void Decoder<OpType_>::encdec_attention() {
 
       /*batchCount*/ _tw._head_num, _computeType,
       CUBLAS_GEMM_DEFAULT_TENSOR_OP));
+
+#ifdef DEBUG_RESULT
+  print_vec(_p_d_dec_wei[_weight_offset + 12],
+            "encdec attn v_proj_kernel_t (head): ", 5);
+  print_vec(_p_d_dec_wei[_weight_offset + 12] +
+                _tw._hidden_size * _tw._hidden_size - 5,
+            "encdec attn v_proj_kernel_t (tail): ", 5);
+  // X * W_i^V [head_num, batch_size * beam_size, dim_per_head]
+  print_vec(_p_d_query_buf1, "encdec attn after_v_proj (head): ", 5);
+  print_vec(
+      _p_d_query_buf1 + _tw._head_num * _step_token_num * _tw._dim_per_head - 5,
+      "encdec attn after_v_proj (tail): ", 5);
+#endif
 
   // reshape X * W_i^V to [1, batch_size * beam_size, head_num *
   // dim_per_head] and add with b_i^V (bias of W_V)

@@ -722,6 +722,13 @@ void Decoder<OpType_>::encdec_attention() {
       _tw._beam_size, _tw._head_num, _batch_seq_len, _batch_size,
       _max_thread_per_block);
 
+#ifdef DEBUG_RESULT
+  // output attn_weights [batch_size, head_num * beam_size, batch_seq_len]
+  print_vec(_p_d_c, "encdec attn attn_weights added (head) ", 5);
+  print_vec(_p_d_c + _tw._head_num * _step_token_num * _batch_seq_len - 5,
+            "encdec attn attn_weights added (tail) ", 5);
+#endif
+
   // 2.6 perform softmax to get attn_probs
   ker_correlation_softmax_encdec_launcher<_DataType>(
       _batch_size, _tw._head_num * _tw._beam_size, _batch_seq_len, _stream,

@@ -54,7 +54,7 @@ def main():
             _, hf_time = hf_bart(hf_model, inputs_id)
             total_ls += ls_time
             total_hf += hf_time
-        print(f"{bsz}: {total_hf/total_ls-1}")
+        print(f"{bsz}: {total_hf/total_ls-1}, {total_hf}, {total_ls}")
 
 
 if __name__ == "__main__":

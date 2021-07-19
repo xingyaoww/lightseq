@@ -1,1 +1,0 @@
-nsys profile --trace=cuda,nvtx -o $1 python3 run-ls.py 

@@ -300,6 +300,15 @@ def extract_transformer_weights(
         src_tb = _gather_token_embedding(
             enc_var_name_list, encoder_state_dict, "shared"
         )
+
+        # pad token embedding for performance
+        _vocab_size, _ = src_tb.shape
+        if _vocab_size % 8 != 0:
+            _pad_amt = ((_vocab_size // 8) + 1) * 8 - _vocab_size
+            print(f"token embedding is not multiple of 8, pad amount {_pad_amt} for TensorCore performance.")
+            assert _pad_amt > 0
+            src_tb = np.pad(src_tb, ((0, _pad_amt), (0, 0)), mode='constant', constant_values=0)
+
         transformer.src_embedding.token_embedding[:] = src_tb.flatten().tolist()
 
     # fill trg_embedding
@@ -329,6 +338,20 @@ def extract_transformer_weights(
     trg_tb = _gather_token_embedding(
         dec_var_name_list, decoder_state_dict, "shared", lang=lang
     )
+
+    # pad token embedding for performance
+    _vocab_size, _ = trg_tb.shape
+    if _vocab_size % 8 != 0:
+        _pad_amt = ((_vocab_size // 8) + 1) * 8 - _vocab_size
+        print(f"token embedding is not multiple of 8, pad amount {_pad_amt} for TensorCore performance.")
+        assert _pad_amt > 0
+        trg_tb = np.pad(trg_tb, ((0, _pad_amt), (0, 0)), mode='constant', constant_values=0)
+
+        # pad bias for token_embedding too
+        shared_bias = np.array(transformer.trg_embedding.shared_bias[:])
+        shared_bias = np.pad(shared_bias, ((0, _pad_amt)), mode='constant', constant_values=0)
+        transformer.trg_embedding.shared_bias[:] = shared_bias.flatten().tolist()
+
     transformer.trg_embedding.token_embedding[:] = trg_tb.transpose().flatten().tolist()
     print(
         "token_embedding.weight -> trg_embedding.token_embedding, shape: {}, conversion finished!".format(
@@ -496,11 +519,11 @@ def extract_transformer_weights(
 
 if __name__ == "__main__":
     # if save_proto is True, extension .pb will be added, otherwise .hdf5 is added
-    output_lightseq_model_name = "lightseq_bart_base"  # you can rename it to "lightseq_bart_large" for large model
+    output_lightseq_model_name = "lightseq_bart_large_4beam_embpad"  # you can rename it to "lightseq_bart_large" for large model
     input_huggingface_bart_model = (
-        "facebook/bart-base"  # Example: you can try "facebook/bart-large" as well
+        "facebook/bart-large"  # Example: you can try "facebook/bart-large" as well
     )
-    head_number = 12  # change this to 16 for "bart-large" model
+    head_number = 16  # change this to 16 for "bart-large" model
     # in order to get score, we should use `beam_search` inference method
     generation_method = "beam_search"
     beam_size = 4

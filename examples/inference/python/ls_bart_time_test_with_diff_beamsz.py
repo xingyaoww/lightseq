@@ -19,7 +19,7 @@ def main():
     print("initializing bart tokenizer...")
     tokenizer = BartTokenizer.from_pretrained("facebook/bart-base")
     print("creating lightseq model...")
-    weightname = f"lightseq_bart_base_{BEAM_SIZE}beam_embpad.hdf5"
+    weightname = f"lightseq_bart_base_{BEAM_SIZE}beam.hdf5"
     print(f"reading {weightname}")
     ls_model = lsi.Transformer(weightname, 128)
 
@@ -58,7 +58,7 @@ def main():
                 _, cur_ls_time = ls_bart(ls_model, inputs_id[:bsz])
                 ls_time += cur_ls_time
             ls_time /= 50
-            
+
             print(f"{bsz}\t{seq_len}\t{ls_time}")
 
 if __name__ == "__main__":

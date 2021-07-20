@@ -44,16 +44,22 @@ def main():
 
     # Actual test
     bsz_list = [1, 2, 4, 8, 16, 32, 64, 128]
+    seq_len_list = [32, 64]    
+    
     for bsz in bsz_list:
-        # run this for 10 times for average
-        seq_len = [32, 64]
-        ls_time = 0
-        for _ in range(50):
-            _, cur_ls_time = ls_bart(ls_model, inputs_id[:bsz])
-            ls_time += cur_ls_time
-        ls_time /= 50
-        print(f"{bsz}: {ls_time}")
-
+        for seq_len in seq_len_list:
+            sentences = [" ".join(["I"] * seq_len)] * bsz
+            inputs = tokenizer(sentences, return_tensors="pt", padding=True)
+            inputs_id = inputs["input_ids"]
+            
+            # run this for 50 times for average
+            ls_time = 0
+            for _ in range(50):
+                _, cur_ls_time = ls_bart(ls_model, inputs_id[:bsz])
+                ls_time += cur_ls_time
+            ls_time /= 50
+            
+            print(f"{bsz}\t{seq_len}\t{ls_time}")
 
 if __name__ == "__main__":
     main()

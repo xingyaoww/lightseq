@@ -110,8 +110,9 @@ int main(int argc, char *argv[]) {
                                                 batch_seq_len, host_input);
 
   /* ---step5. infer and log--- */
-  for (int i = 0; i < 1; i++) {
-    auto start = std::chrono::high_resolution_clock::now();
+  int n_tests = 100;
+  auto start = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < n_tests; i++) {
     // copy inputs from cpu memory to gpu memory
     cudaMemcpyAsync(
         reinterpret_cast<int *>(thrust::raw_pointer_cast(d_input_.data())),
@@ -119,12 +120,9 @@ int main(int argc, char *argv[]) {
         cudaMemcpyHostToDevice, stream_);
     encoder_->run_one_infer(batch_size, batch_seq_len);
     decoder_->run_one_infer(batch_size, batch_seq_len);
-    lightseq::cuda::print_time_duration(start, "one infer time", stream_);
-    for (int ii = 0; ii < batch_size; ii++) {
-      lightseq::cuda::print_vec(
-          d_output_.data() + ii * (decoder_->_cur_step + 1), "finial res",
-          decoder_->_cur_step + 1);
-    }
   }
+  auto finish = std::chrono::high_resolution_clock::now();
+  auto average_time_consumed = (finish - start) / n_tests;
+  std::cout << "time consumed: " << average_time_consumed << std::endl;
   return 0;
 }

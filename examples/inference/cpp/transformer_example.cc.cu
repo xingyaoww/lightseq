@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
       using thrust vector to avoid manage gpu memory by hand
   */
   // instantiate encoder
-  int max_batch_size = 8;
+  int max_batch_size = 128;
   thrust::device_vector<int> d_input_ =
       std::vector<int>(max_batch_size * tw_._max_step, 0);
   thrust::device_vector<int> d_padding_mask_ =
@@ -122,7 +122,8 @@ int main(int argc, char *argv[]) {
     decoder_->run_one_infer(batch_size, batch_seq_len);
   }
   auto finish = std::chrono::high_resolution_clock::now();
-  auto average_time_consumed = (finish - start) / n_tests;
-  std::cout << "time consumed: " << average_time_consumed << std::endl;
+  std::chrono::duration<double> elapsed = finish - start;
+  double average_time_consumed = elapsed.count() * 1000 / n_tests;
+  std::cout << "time consumed (ms): " << average_time_consumed << std::endl;
   return 0;
 }
